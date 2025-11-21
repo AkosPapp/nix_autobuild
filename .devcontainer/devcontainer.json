@@ -1,0 +1,18 @@
+{
+	"name": "Ubuntu",
+	"image": "mcr.microsoft.com/devcontainers/base:noble",
+	"features": {
+		"ghcr.io/akospapp/devcontainer-features/nix-devcontainer:latest": {}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"rust-lang.rust-analyzer",
+				"panicbit.cargo",
+				"tamasfe.even-better-toml",
+				"swellaby.rust-pack",
+				"nyxiative.rust-and-friends"
+			]
+		}
+	}
+}
