@@ -23,7 +23,8 @@ The program reads a JSON configuration file passed as the first CLI argument. Ex
       "poll_interval_sec": 60
     }
   ],
-  "dir": "data",
+  "dir": "/workspaces/nix_autobuild/data",
+  "thread_count": 2,
   "supported_architectures": [
     "x86_64-linux"
   ]
@@ -35,7 +36,8 @@ Fields:
   - `url`: git clone URL
   - `name`: local directory name under `dir` where the repo will be cloned
   - `poll_interval_sec`: how often (in seconds) to pull for changes
-- `dir`: base directory used to store cloned repositories (created if missing)
+- `dir`: base directory used to store cloned repositories (created if missing). Can be relative or absolute path.
+- `thread_count`: number of threads in the Rayon thread pool for parallel builds
 - `supported_architectures`: list of architecture names to build for (must be one of the supported constants in the code, e.g. `x86_64-linux`, `aarch64-linux`, `x86_64-darwin`, `aarch64-darwin`)
 
 The program validates that each `supported_architectures` value is one of the supported set and will panic at startup if an unknown architecture is provided.
