@@ -1,3 +1,9 @@
 result
 target
 data
+**/target/
+**/dist/
+
+# Added by cargo
+
+/target

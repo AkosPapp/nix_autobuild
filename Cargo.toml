@@ -3,13 +3,74 @@ name = "nix_autobuild"
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+actix-web = "4.12.1"
+actix-files = "0.6.9"
+actix-cors = "0.7"
+git2 = "0.20.2"
+wasm-bindgen = { version = "0.2.106", features = [
+    "serde",
+    "serde-serialize",
+    "serde_json",
+] }
 rayon = "1.11.0"
 serde = "1.0.228"
 serde_derive = "1.0.228"
 serde_json = "1.0.145"
+serde-nixos = "0.1.1"
+regex = "1.12.2"
+paste = "1.0.15"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-net = "0.6.0"
+gloo-timers = { version = "0.3.0", features = ["futures"] }
+wasm-bindgen-futures = "0.4.56"
+wasm-bindgen = "0.2.106"
+web-sys = { version = "0.3.73", features = [
+    "Window",
+    "Response",
+    "Request",
+    "Headers",
+] }
+yew = { version = "0.21", features = ["csr"] }
+serde = "1.0.228"
+serde-nixos = "0.1.1"
+#gloo-net = "0.6.0"
+#wasm-bindgen-futures = "0.4"
+#serde = { version = "1.0", features = ["derive"] }
+#serde_json = "1.0"
+#reqwest = "0.12.24"
+serde_json = "1.0"
+#wasm-bindgen = { version = "0.2.106", features = [
+#    "serde",
+#    "serde-serialize",
+#    "serde_json",
+#] }
+#rayon = "1.11.0"
+#serde = "1.0.228"
+#serde_derive = "1.0.228"
+#serde_json = "1.0.145"
+
+[target.'cfg(target_arch = "wasm32")'.profile.release]
+# less code to include into binary
+panic = 'abort'
+# optimization over all codebase ( better optimization, slower build )
+codegen-units = 1
+# optimization for size ( more aggressive )
+opt-level = 'z'
+# optimization for size
+# opt-level = 's'
+# link time optimization using using whole-program analysis
+lto = true
+
+
 
 [lints.clippy]
 unwrap_used = "deny"
 panic = "deny"
 expect_used = "deny"
+
+[dev-dependencies]
+paste = "1.0.15"

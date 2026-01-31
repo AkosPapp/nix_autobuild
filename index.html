@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="./styles.css" />
+  <title>Yew App</title>
+</head>
+
+<body>
+  <script type="module">
+    import init from './nix_autobuild.js';
+
+    async function run() {
+      await init();
+    }
+
+    run();
+  </script>
+</body>
+
+</html>
