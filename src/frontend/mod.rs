@@ -17,7 +17,11 @@ use yew::prelude::*;
 // Fetch the repo list via Fetch API and return deserialized RepoList
 async fn fetch_repos() -> Result<RepoList, String> {
     let window = web_sys::window().ok_or_else(|| "no window available".to_string())?;
-    let resp_value = JsFuture::from(window.fetch_with_str("http://127.0.0.1:8080/repos"))
+    let location = window.location();
+    let protocol = location.protocol().map_err(|_| "no protocol".to_string())?;
+    let host = location.host().map_err(|_| "no host".to_string())?;
+    let url = format!("{}//{}/repos", protocol, host);
+    let resp_value = JsFuture::from(window.fetch_with_str(&url))
         .await
         .map_err(|e| format!("fetch failed: {e:?}"))?;
     let resp: Response = resp_value
