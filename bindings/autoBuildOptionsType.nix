@@ -1,7 +1,7 @@
 {lib, ...}: let
   types = lib.types;
 in let
-  repoType = types.submodule {
+  repoType = {
     options = {
       url = lib.mkOption {
         type = types.str;
@@ -30,10 +30,10 @@ in let
 
     };
   };
-  autoBuildOptionsType = types.submodule {
+  autoBuildOptionsType = {
     options = {
     repos = lib.mkOption {
-      type = types.listOf repoType;
+      type = types.listOf (types.submodule repoType);
       description = "List of repositories to monitor";
       default = [];
     };

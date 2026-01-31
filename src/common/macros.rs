@@ -12,15 +12,27 @@ macro_rules! generate_nixos_module {
                 let replacements = re
                     .captures_iter(&nix)
                     .map(|cap| {
-                        let from = format!("types.submodule {{ /* {} options */ }}", &cap[1]);
-                        let type_name = &cap[1];
+                        let first_char = &cap[1].chars().next().unwrap().to_uppercase().to_string();
+                        let rest = &cap[1][first_char.len()..];
+
+                        let type_name = format!("{}Type", &cap[1]);
+                        let struct_name = format!("{}{}", first_char, rest);
+
+                        let from = format!("types.submodule {{ /* {} options */ }}", struct_name);
                         let to = format!(
-                            "{}{}Type",
-                            type_name.chars().next().unwrap().to_uppercase(),
-                            &type_name[1..]
+                            "(types.submodule {})",
+                            type_name
                         );
-                        (from, to)
+
+                        let from2 = format!("  {} = types.submodule {{", type_name);
+                        let to2 = format!("  {} = {{", type_name);
+
+                        [
+                        (from, to),
+                        (from2, to2)
+                        ]
                     })
+                    .flatten()
                     .collect::<Vec<_>>();
                 for (from, to) in replacements {
                     nix = nix.replace(&from, &to);
@@ -35,7 +47,7 @@ macro_rules! generate_nixos_module {
                     "{{lib, ...}}: let
   types = lib.types;
 in {}",
-                    nix.replace("types.submodule { /* Repo options */ }", "repoType")
+                    nix
                 )
 
             }
