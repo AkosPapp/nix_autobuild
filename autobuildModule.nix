@@ -8,7 +8,7 @@ self: {
     enable = lib.mkEnableOption "Nix Autobuild service";
 
     settings = lib.mkOption {
-      type = lib.types.submodule import ./bindings/autoBuildOptionsType.nix;
+      type = lib.types.submodule (import ./bindings/autoBuildOptionsType.nix);
       description = "Configuration options for the Nix Autobuild service";
       default = {};
     };
