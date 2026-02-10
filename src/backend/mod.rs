@@ -1,5 +1,4 @@
 extern crate git2;
-extern crate rayon;
 extern crate serde;
 extern crate serde_json;
 extern crate serde_nixos;
@@ -12,6 +11,7 @@ use crate::{
 };
 use actix_web::{App, HttpResponse, HttpServer, Responder, get};
 use git2::{Commit, Repository};
+use rayon::prelude::*;
 use serde_json::{Map, Value};
 use std::sync::RwLock;
 use std::{collections::HashMap, env::args, path::PathBuf, sync::Arc, thread};
@@ -184,7 +184,14 @@ impl RepoInfoTrait for RepoInfo {
 
                     let commit = branch.get().peel_to_commit().expect("no commit on branch");
                     let mut commits: Vec<Arc<CommitInfo>> = Vec::new();
-                    self.parse_commit_parents(&commit, self.repo.build_depth, &mut commits);
+                    // Add the current commit first
+                    commits.push(self.get_or_create_commit(&commit));
+                    // Then add parent commits up to build_depth - 1
+                    self.parse_commit_parents(
+                        &commit,
+                        self.repo.build_depth.saturating_sub(1),
+                        &mut commits,
+                    );
 
                     *self
                         .branch_commit_hashes
@@ -250,7 +257,7 @@ impl PackageBase for Package {
     }
 
     fn build(self: Arc<Self>) {
-        rayon::spawn(move || {
+        thread::spawn(move || {
             // skip packages not matching supported architectures
             *self.status.0.write().unwrap() = PackageBuildStatus::Building;
             let mut arch_supported = false;
@@ -334,7 +341,7 @@ impl CommitInfoTrait for CommitInfo {
     }
 
     fn build(self: Arc<Self>) {
-        rayon::spawn(move || {
+        thread::spawn(move || {
             *self.status.0.write().unwrap() = CommitBuildStatus::GettingPackages;
             let Ok(pkgs) = self.get_pkgs_list(&self.flake_url) else {
                 return;
@@ -345,7 +352,7 @@ impl CommitInfoTrait for CommitInfo {
                     pkgs_writer.push(pkg.clone());
                 });
             }
-            pkgs.iter().for_each(|pkg| {
+            pkgs.par_iter().for_each(|pkg| {
                 pkg.build();
             });
             *self.status.0.write().unwrap() = CommitBuildStatus::Idle;
@@ -472,16 +479,17 @@ impl PackageBase for NixosConfigPackage {
             return None;
         }
 
+        let path = format!("{}.config.system.build.toplevel", path);
         Some(Arc::new(NixosConfigPackage {
-            path: format!("{}.config.system.build.toplevel", path),
             pkg_type: pkg_type.to_string(),
-            flake_url: format!("{}#{}", commit.flake_url, commit.hash),
+            flake_url: format!("{}#{}", commit.flake_url, path),
+            path,
             status: RwLockWrapper::new(PackageBuildStatus::Idle),
         }))
     }
 
     fn build(self: Arc<Self>) {
-        rayon::spawn(move || {
+        thread::spawn(move || {
             *self.status.0.write().unwrap() = PackageBuildStatus::Building;
 
             match Self::build_static(self.flake_url.as_str()) {
@@ -509,7 +517,7 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let build_repos = RepoList(VecArcWrapper::from(
         settings
             .repos
-            .iter()
+            .par_iter()
             .map(|repo| {
                 let repo_info = RepoInfo::new(
                     repo.clone(),

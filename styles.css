@@ -308,6 +308,14 @@ a {
     border: 1px solid rgba(156, 163, 175, 0.3);
 }
 
+.table-row-hover {
+    transition: background-color 0.2s ease;
+}
+
+.table-row-hover:hover {
+    background-color: rgba(124, 241, 201, 0.08) !important;
+}
+
 @media (max-width: 640px) {
     .page-header h1 {
         font-size: 32px;

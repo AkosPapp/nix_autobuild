@@ -49,7 +49,7 @@ fn repos(repos: &RepoList, props: &Props) -> Html {
         .iter()
         .flat_map(|repo| {
             // Collect packages from each repo
-            repo.commits.0.iter().flat_map(|(hash, commit)| {
+            repo.commits.0.iter().flat_map(|(_hash, commit)| {
                 commit
                     .packages
                     .0
@@ -80,6 +80,11 @@ fn repos(repos: &RepoList, props: &Props) -> Html {
         ),
     > = BTreeMap::new();
 
+    // Initialize all repos in the map (even if they have no packages)
+    for repo in repos.0.0.iter() {
+        grouped.insert(repo.repo.url.clone(), (repo, BTreeMap::new()));
+    }
+
     for package in &all_packages {
         let repo_url = package.repo.repo.url.clone();
         let arch = match package.pkg {
@@ -94,18 +99,18 @@ fn repos(repos: &RepoList, props: &Props) -> Html {
         // Find which branches contain this commit
         for (branch_name, commit_hashes) in &package.repo.branch_commit_hashes {
             if commit_hashes.0.contains(&package.commit.hash) {
-                let entry = grouped
-                    .entry(repo_url.clone())
-                    .or_insert_with(|| (package.repo, BTreeMap::new()));
-                entry
-                    .1
-                    .entry(package_name.clone())
-                    .or_default()
-                    .entry(branch_name.clone())
-                    .or_default()
-                    .entry(package.commit.hash.clone())
-                    .or_default()
-                    .insert(arch.clone(), package);
+                // Entry already exists from initialization above
+                if let Some(entry) = grouped.get_mut(&repo_url) {
+                    entry
+                        .1
+                        .entry(package_name.clone())
+                        .or_default()
+                        .entry(branch_name.clone())
+                        .or_default()
+                        .entry(package.commit.hash.clone())
+                        .or_default()
+                        .insert(arch.clone(), package);
+                }
             }
         }
     }
@@ -278,7 +283,7 @@ fn commit_html(
 }
 
 fn arch_html(arch: &String, package: &Package<'_>, props: &Props) -> Html {
-    let (name, pkg_type, status_text, result) = match package.pkg {
+    let (_name, pkg_type, status_text, result) = match package.pkg {
         PackageEnum::Derivation(arc_wrapper) => (
             arc_wrapper.0.name.clone(),
             arc_wrapper.0.pkg_type.clone(),
@@ -513,6 +518,224 @@ pub struct Package<'a> {
     pkg: &'a PackageEnum,
 }
 
+#[derive(Properties, PartialEq)]
+struct TableRowProps {
+    repo_url: String,
+    package_path: String,
+    branch: String,
+    commit_message: String,
+    status_class: String,
+    repo_debug: String,
+    commit_debug: String,
+    pkg_debug: String,
+}
+
+#[function_component]
+fn TableRow(props: &TableRowProps) -> Html {
+    let expanded = use_state(|| false);
+    let toggle = {
+        let expanded = expanded.clone();
+        Callback::from(move |_| {
+            expanded.set(!*expanded);
+        })
+    };
+
+    html! {
+        <>
+            <tr onclick={toggle} class="table-row-hover" style="cursor: pointer; border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
+                <td style="padding: 12px; color: var(--text);">{ &props.repo_url }</td>
+                <td style="padding: 12px; font-family: monospace; font-size: 0.9em; color: var(--text);">{ &props.package_path }</td>
+                <td style="padding: 12px; color: var(--text);">{ &props.branch }</td>
+                <td style="padding: 12px; color: var(--muted);">{ &props.commit_message }</td>
+                <td style="padding: 12px; text-align: center;">
+                    <span style={format!("display: inline-block; width: 12px; height: 12px; border-radius: 50%; {}",
+                        match props.status_class.as_str() {
+                            "status-success" => "background-color: #4caf50;",
+                            "status-failed" => "background-color: #f44336;",
+                            "status-building" => "background-color: #ff9800;",
+                            "status-pending" => "background-color: #2196f3;",
+                            _ => "background-color: #9e9e9e;",
+                        }
+                    )} title={props.status_class.clone()}></span>
+                </td>
+            </tr>
+            if *expanded {
+                <tr>
+                    <td colspan="5" style="background: var(--card-strong); padding: 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
+                        <details open={true}>
+                            <summary><strong style="color: var(--text);">{ "Repository Debug Info" }</strong></summary>
+                            <pre style="overflow-x: auto; white-space: pre-wrap; color: var(--muted); background: var(--card); padding: 8px; border-radius: 4px; margin-top: 8px;">{ &props.repo_debug }</pre>
+                        </details>
+                        <details open={true}>
+                            <summary><strong style="color: var(--text);">{ "Commit Debug Info" }</strong></summary>
+                            <pre style="overflow-x: auto; white-space: pre-wrap; color: var(--muted); background: var(--card); padding: 8px; border-radius: 4px; margin-top: 8px;">{ &props.commit_debug }</pre>
+                        </details>
+                        <details open={true}>
+                            <summary><strong style="color: var(--text);">{ "Package Debug Info" }</strong></summary>
+                            <pre style="overflow-x: auto; white-space: pre-wrap; color: var(--muted); background: var(--card); padding: 8px; border-radius: 4px; margin-top: 8px;">{ &props.pkg_debug }</pre>
+                        </details>
+                    </td>
+                </tr>
+            }
+        </>
+    }
+}
+
+fn format_repo_debug(repo: &RepoInfo) -> String {
+    format!(
+        "RepoInfo {{\n  flake_url: {:?},\n  repo: {:#?},\n  checkout_path: {:?},\n  branch_commit_hashes: {:#?},\n  commits: <{} commits (excluded from display)>,\n  status: {:?},\n}}",
+        repo.flake_url,
+        repo.repo,
+        repo.checkout_path,
+        repo.branch_commit_hashes,
+        repo.commits.0.len(),
+        repo.status.0
+    )
+}
+
+fn format_commit_debug(commit: &CommitInfo) -> String {
+    format!(
+        "CommitInfo {{\n  message: {:?},\n  flake_url: {:?},\n  hash: {:?},\n  packages: <{} packages (excluded from display)>,\n  unix_secs: {},\n  status: {:?},\n}}",
+        commit.message,
+        commit.flake_url,
+        commit.hash,
+        commit.packages.0.len(),
+        commit.unix_secs,
+        commit.status.0
+    )
+}
+
+fn repos_table(repos: &RepoList) -> Html {
+    let mut package_list: Vec<(&RepoInfo, &CommitInfo, &PackageEnum)> = repos
+        .0
+        .0
+        .iter()
+        .flat_map(|repo| {
+            repo.commits.0.iter().flat_map(move |(_hash, commit)| {
+                commit.packages.0.iter().map(move |pkg| (repo, commit, pkg))
+            })
+        })
+        .collect();
+
+    // Sort by: repo name, package name, branch, commit time (desc), arch
+    package_list.sort_by(|(repo_a, commit_a, pkg_a), (repo_b, commit_b, pkg_b)| {
+        let repo_name_a = &repo_a.repo.url;
+        let repo_name_b = &repo_b.repo.url;
+
+        let pkg_name_a = match pkg_a {
+            PackageEnum::Derivation(arc_wrapper) => arc_wrapper.0.get_no_arch_name(),
+            PackageEnum::NixosConfig(arc_wrapper) => arc_wrapper.0.path.clone(),
+        };
+        let pkg_name_b = match pkg_b {
+            PackageEnum::Derivation(arc_wrapper) => arc_wrapper.0.get_no_arch_name(),
+            PackageEnum::NixosConfig(arc_wrapper) => arc_wrapper.0.path.clone(),
+        };
+
+        let branch_a = repo_a
+            .branch_commit_hashes
+            .iter()
+            .find_map(|(branch, hashes)| {
+                if hashes.0.contains(&commit_a.hash) {
+                    Some(branch.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "-".to_string());
+        let branch_b = repo_b
+            .branch_commit_hashes
+            .iter()
+            .find_map(|(branch, hashes)| {
+                if hashes.0.contains(&commit_b.hash) {
+                    Some(branch.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "-".to_string());
+
+        let arch_a = match pkg_a {
+            PackageEnum::Derivation(arc_wrapper) => arc_wrapper.0.arch.clone(),
+            PackageEnum::NixosConfig(_arc_wrapper) => "N/A".to_string(),
+        };
+        let arch_b = match pkg_b {
+            PackageEnum::Derivation(arc_wrapper) => arc_wrapper.0.arch.clone(),
+            PackageEnum::NixosConfig(_arc_wrapper) => "N/A".to_string(),
+        };
+
+        repo_name_a
+            .cmp(repo_name_b)
+            .then_with(|| pkg_name_a.cmp(&pkg_name_b))
+            .then_with(|| branch_a.cmp(&branch_b))
+            .then_with(|| commit_b.unix_secs.cmp(&commit_a.unix_secs)) // Descending (newest first)
+            .then_with(|| arch_a.cmp(&arch_b))
+    });
+
+    html! {
+        <table style="width: 100%; border-collapse: collapse; background: var(--card); box-shadow: var(--shadow); border-radius: var(--radius); overflow: hidden;">
+            <thead>
+                <tr style="background: var(--card-strong); border-bottom: 2px solid rgba(255, 255, 255, 0.08);">
+                    <th style="padding: 12px; text-align: left; font-weight: 600; color: var(--text);">{ "Repository" }</th>
+                    <th style="padding: 12px; text-align: left; font-weight: 600; color: var(--text);">{ "Package Path" }</th>
+                    <th style="padding: 12px; text-align: left; font-weight: 600; color: var(--text);">{ "Branch" }</th>
+                    <th style="padding: 12px; text-align: left; font-weight: 600; color: var(--text);">{ "Commit" }</th>
+                    <th style="padding: 12px; text-align: center; font-weight: 600; color: var(--text);">{ "Status" }</th>
+                </tr>
+            </thead>
+            <tbody>
+                { for package_list.iter().map(|(repo, commit, pkg)| {
+                    let package_path = match pkg {
+                        PackageEnum::Derivation(arc_wrapper) => arc_wrapper.0.path.clone(),
+                        PackageEnum::NixosConfig(arc_wrapper) => arc_wrapper.0.path.clone(),
+                    };
+                    let branch = repo.branch_commit_hashes.iter()
+                        .find_map(|(branch, hashes)| {
+                            if hashes.0.contains(&commit.hash) {
+                                Some(branch.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or_else(|| "-".to_string());
+
+                    let commit_first_line = commit.message.lines().next().unwrap_or("");
+                    let commit_display = if commit_first_line.len() > 10 {
+                        format!("{}...", &commit_first_line[..10])
+                    } else {
+                        commit_first_line.to_string()
+                    };
+
+                    let status_text = match pkg {
+                        PackageEnum::Derivation(arc_wrapper) => format!("{:?}", arc_wrapper.0.status.0),
+                        PackageEnum::NixosConfig(arc_wrapper) => format!("{:?}", arc_wrapper.0.status.0),
+                    };
+
+                    let status_class = match status_text.as_str() {
+                        s if s.contains("Success") => "status-success",
+                        s if s.contains("Failed") || s.contains("Failure") => "status-failed",
+                        s if s.contains("Building") || s.contains("Running") => "status-building",
+                        s if s.contains("Pending") || s.contains("Queued") => "status-pending",
+                        _ => "status-unknown",
+                    };
+
+                    html! {
+                        <TableRow
+                            repo_url={repo.repo.url.clone()}
+                            package_path={package_path}
+                            branch={branch}
+                            commit_message={commit_display}
+                            status_class={status_class.to_string()}
+                            repo_debug={format_repo_debug(repo)}
+                            commit_debug={format_commit_debug(commit)}
+                            pkg_debug={format!("{:#?}", pkg)}
+                        />
+                    }
+                }) }
+            </tbody>
+        </table>
+    }
+}
+
 #[function_component]
 fn App() -> Html {
     let data = use_state(|| None::<Result<RepoList, String>>);
@@ -548,6 +771,11 @@ fn App() -> Html {
         None => html! { <p class="meta">{ "Loading data..." }</p> },
     };
 
+    let table = match &*data {
+        Some(Ok(list)) => repos_table(&list),
+        _ => html! { <p class="meta">{ "No table to display" }</p> },
+    };
+
     html! {
         <div class="app-bg">
             <main class="page">
@@ -557,6 +785,7 @@ fn App() -> Html {
                     <p class="meta">{ "Auto-refreshing every second" }</p>
                 </header>
                 { body }
+                { table }
                 { format!("{:?}", props) }
             </main>
         </div>

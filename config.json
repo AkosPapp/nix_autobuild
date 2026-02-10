@@ -1,14 +1,50 @@
 {
   "repos": [
     {
+      "url": "github.com/PPAPSONKA/nix",
+      "poll_interval_sec": 30,
+      "branches": [
+        "main"
+      ],
+      "build_depth": 5
+    },
+    {
+      "url": "github.com/PPAPSONKA/nixvim",
+      "poll_interval_sec": 30,
+      "branches": [
+        "main"
+      ],
+      "build_depth": 5
+    },
+    {
+      "url": "github.com/AkosPapp/nix_autobuild",
+      "poll_interval_sec": 30,
+      "branches": [
+        "main"
+      ],
+      "build_depth": 5
+    },
+    {
+      "url": "github.com/AkosPapp/rs_reverse_proxy",
+      "poll_interval_sec": 30,
+      "branches": [
+        "main"
+      ],
+      "build_depth": 5
+    },
+    {
       "url": "git.robo4you.at/akos.papp/DA",
       "poll_interval_sec": 30,
-      "branches": ["main"],
+      "branches": [
+        "main"
+      ],
       "build_depth": 5
     }
   ],
   "dir": "/workspaces/nix_autobuild/data",
-  "supported_architectures": ["x86_64-linux"],
+  "supported_architectures": [
+    "x86_64-linux"
+  ],
   "host": "127.0.0.1",
   "port": 8085
 }
