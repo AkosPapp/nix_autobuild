@@ -22,6 +22,7 @@ serde_json = "1.0.145"
 serde-nixos = "0.1.1"
 regex = "1.12.2"
 paste = "1.0.15"
+num_cpus = "1.17.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-net = "0.6.0"
@@ -37,21 +38,7 @@ web-sys = { version = "0.3.73", features = [
 yew = { version = "0.21", features = ["csr"] }
 serde = "1.0.228"
 serde-nixos = "0.1.1"
-#gloo-net = "0.6.0"
-#wasm-bindgen-futures = "0.4"
-#serde = { version = "1.0", features = ["derive"] }
-#serde_json = "1.0"
-#reqwest = "0.12.24"
 serde_json = "1.0"
-#wasm-bindgen = { version = "0.2.106", features = [
-#    "serde",
-#    "serde-serialize",
-#    "serde_json",
-#] }
-#rayon = "1.11.0"
-#serde = "1.0.228"
-#serde_derive = "1.0.228"
-#serde_json = "1.0.145"
 
 [target.'cfg(target_arch = "wasm32")'.profile.release]
 # less code to include into binary

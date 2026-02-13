@@ -138,7 +138,9 @@ fn repo_html(
         s if s.contains("Success") => "status-success",
         s if s.contains("Failed") || s.contains("Failure") => "status-failed",
         s if s.contains("Building") || s.contains("Running") => "status-building",
-        s if s.contains("Pending") || s.contains("Queued") => "status-pending",
+        s if s.contains("Pending") || s.contains("Queued") || s.contains("WaitingForBuild") => {
+            "status-pending"
+        }
         _ => "status-unknown",
     };
     let is_open = props.repo_name.as_deref() == Some(repo_name);
@@ -308,7 +310,9 @@ fn arch_html(arch: &String, package: &Package<'_>, props: &Props) -> Html {
         s if s.contains("Success") => "status-success",
         s if s.contains("Failed") || s.contains("Failure") => "status-failed",
         s if s.contains("Building") || s.contains("Running") => "status-building",
-        s if s.contains("Pending") || s.contains("Queued") => "status-pending",
+        s if s.contains("Pending") || s.contains("Queued") || s.contains("WaitingForBuild") => {
+            "status-pending"
+        }
         _ => "status-unknown",
     };
 
@@ -714,7 +718,7 @@ fn repos_table(repos: &RepoList) -> Html {
                         s if s.contains("Success") => "status-success",
                         s if s.contains("Failed") || s.contains("Failure") => "status-failed",
                         s if s.contains("Building") || s.contains("Running") => "status-building",
-                        s if s.contains("Pending") || s.contains("Queued") => "status-pending",
+                        s if s.contains("Pending") || s.contains("Queued") || s.contains("WaitingForBuild") => "status-pending",
                         _ => "status-unknown",
                     };
 

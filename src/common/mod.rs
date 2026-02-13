@@ -77,6 +77,12 @@ pub struct AutoBuildOptions {
         default = "8080"
     )]
     pub port: u16,
+
+    #[nixos(
+        description = "Number of threads to use for building. If 0, uses the number of CPU cores.",
+        default = "0"
+    )]
+    pub n_build_threads: usize,
 }
 
 pub const ARCHITECTURES: [&str; 24] = [

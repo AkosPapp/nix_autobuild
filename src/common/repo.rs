@@ -7,9 +7,12 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use crate::{common::commit::{CommitInfo, RepoStatus}, serialize::RwLockWrapper};
 use crate::serialize::RwLockHashMapArc;
 use crate::{AutoBuildOptions, Repo};
+use crate::{
+    common::commit::{CommitInfo, RepoStatus},
+    serialize::RwLockWrapper,
+};
 
 unsafe impl Send for RepoStatus {}
 unsafe impl Sync for RepoStatus {}

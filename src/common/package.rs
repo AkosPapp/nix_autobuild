@@ -22,11 +22,12 @@ unsafe impl Sync for PackageEnum {}
 #[derive(Debug)]
 pub enum PackageBuildStatus {
     Idle,
-    Building,
     #[cfg(target_arch = "wasm32")]
     UnsupportedArchitecture(String),
     #[cfg(not(target_arch = "wasm32"))]
     UnsupportedArchitecture(&'static str),
+    WaitingForBuild,
+    Building,
     Success(String),
     Failed(String),
 }

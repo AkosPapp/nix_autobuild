@@ -63,6 +63,12 @@ in let
       default = 8080;
     };
 
+    n_build_threads = lib.mkOption {
+      type = types.int;
+      description = "Number of threads to use for building. If 0, uses the number of CPU cores.";
+      default = 0;
+    };
+
     };
   };
 in autoBuildOptionsType

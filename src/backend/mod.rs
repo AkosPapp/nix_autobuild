@@ -13,13 +13,63 @@ use actix_web::{App, HttpResponse, HttpServer, Responder, get};
 use git2::{Commit, Repository};
 use rayon::prelude::*;
 use serde_json::{Map, Value};
-use std::sync::RwLock;
+use std::mem::MaybeUninit;
+use std::os::linux::raw::stat;
+use std::sync::{Condvar, Mutex, RwLock};
 use std::{collections::HashMap, env::args, path::PathBuf, sync::Arc, thread};
 
 const FRONTEND_PATH: &str = match option_env!("FRONTEND_PATH") {
     Some(path) => path,
     None => "/workspaces/nix_autobuild/result/dist",
 };
+
+static mut SEM: MaybeUninit<Semaphore> = MaybeUninit::uninit();
+/// A simple semaphore implementation using Mutex and Condvar
+pub struct Semaphore {
+    count: Mutex<usize>,
+    condvar: Condvar,
+}
+
+impl Semaphore {
+    #[allow(static_mut_refs)]
+    pub fn init(count: usize) {
+        unsafe {
+            SEM.write(Semaphore {
+                count: Mutex::new(count),
+                condvar: Condvar::new(),
+            });
+        }
+    }
+
+    #[allow(static_mut_refs)]
+    pub fn get_sem() -> &'static Self {
+        unsafe { SEM.assume_init_ref() }
+    }
+
+    fn acquire(&self) {
+        let mut count = self.count.lock().unwrap();
+        while *count == 0 {
+            count = self.condvar.wait(count).unwrap();
+        }
+        *count -= 1;
+    }
+
+    fn release(&self) {
+        let mut count = self.count.lock().unwrap();
+        *count += 1;
+        self.condvar.notify_one();
+    }
+
+    pub fn execute<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        self.acquire();
+        let result = f();
+        self.release();
+        result
+    }
+}
 
 pub trait RepoInfoTrait {
     fn new(repo: Repo, checkout_path: PathBuf, settings: Arc<AutoBuildOptions>) -> Arc<RepoInfo>;
@@ -275,7 +325,7 @@ impl PackageBase for Package {
                 return;
             }
 
-            match Self::build_static(self.flake_url.as_str()) {
+            match Self::build_static(self.flake_url.as_str(), &self.status) {
                 Ok(path) => {
                     *self.status.0.write().unwrap() = PackageBuildStatus::Success(path);
                 }
@@ -363,35 +413,38 @@ impl CommitInfoTrait for CommitInfo {
         self: &Arc<Self>,
         flake_url: &str,
     ) -> Result<Vec<PackageEnum>, Box<dyn std::error::Error>> {
-        let output = std::process::Command::new("nix")
-            .arg("flake")
-            .arg("show")
-            .arg("--json")
-            .arg("--all-systems")
-            .arg(flake_url)
-            .output()?;
-        println!("LIST\t{}", flake_url); // TODO: add error handling
+        Semaphore::get_sem().execute(|| {
+            *self.status.0.write().unwrap() = CommitBuildStatus::GettingPackages;
+            let output = std::process::Command::new("nix")
+                .arg("flake")
+                .arg("show")
+                .arg("--json")
+                .arg("--all-systems")
+                .arg(flake_url)
+                .output()?;
+            println!("LIST\t{}", flake_url); // TODO: add error handling
 
-        if output.status.code().unwrap_or(-1) != 0 {
-            let list_error = String::from_utf8_lossy(&output.stderr);
-            println!("ERROR listing {} -> {}", flake_url, list_error);
-            return Err("Failed to list packages in flake".into());
-        }
+            if output.status.code().unwrap_or(-1) != 0 {
+                let list_error = String::from_utf8_lossy(&output.stderr);
+                println!("ERROR listing {} -> {}", flake_url, list_error);
+                return Err("Failed to list packages in flake".into());
+            }
 
-        let pkgs_json = String::from_utf8(output.stdout)?;
-        //println!("{}", pkgs_json);
+            let pkgs_json = String::from_utf8(output.stdout)?;
+            //println!("{}", pkgs_json);
 
-        let pkgs_value: Value = serde_json::from_str(&pkgs_json)?;
-        //println!("{:#?}", pkgs_value);
+            let pkgs_value: Value = serde_json::from_str(&pkgs_json)?;
+            //println!("{:#?}", pkgs_value);
 
-        let Some(pkgs_object) = pkgs_value.as_object() else {
-            return Err("No packages found in flake".into());
-        };
+            let Some(pkgs_object) = pkgs_value.as_object() else {
+                return Err("No packages found in flake".into());
+            };
 
-        let mut pkgs_vec: Vec<PackageEnum> = Vec::new();
-        Self::_parse_pkgs_value(pkgs_object, String::new(), &self, &mut pkgs_vec);
-
-        Ok(pkgs_vec)
+            let mut pkgs_vec: Vec<PackageEnum> = Vec::new();
+            Self::_parse_pkgs_value(pkgs_object, String::new(), &self, &mut pkgs_vec);
+            *self.status.0.write().unwrap() = CommitBuildStatus::Idle;
+            Ok(pkgs_vec)
+        })
     }
 
     fn _parse_pkgs_value(
@@ -441,25 +494,29 @@ pub trait PackageBase: Send + Sync {
 
     fn build(self: Arc<Self>);
 
-    fn build_static(flake_pkg_url: &str) -> Result<String, Box<dyn std::error::Error>> {
-        println!("BUILD\t{}", flake_pkg_url);
-        let output = std::process::Command::new("nix")
-            .arg("build")
-            .arg("--no-link")
-            .arg("--print-out-paths")
-            .arg(&flake_pkg_url)
-            .output()?;
+    fn build_static(flake_pkg_url: &str, status: &RwLockWrapper<PackageBuildStatus>) -> Result<String, Box<dyn std::error::Error>> {
+        status.0.write().unwrap().clone_from(&PackageBuildStatus::WaitingForBuild);
+        Semaphore::get_sem().execute(|| {
+            status.0.write().unwrap().clone_from(&PackageBuildStatus::Building);
+            println!("BUILD\t{}", flake_pkg_url);
+            let output = std::process::Command::new("nix")
+                .arg("build")
+                .arg("--no-link")
+                .arg("--print-out-paths")
+                .arg(&flake_pkg_url)
+                .output()?;
 
-        if output.status.code().unwrap_or(-1) != 0 {
-            let build_error = String::from_utf8_lossy(&output.stderr);
-            println!("ERROR\t{} -> {}", flake_pkg_url, build_error);
-            return Err(build_error.into());
-        }
+            if output.status.code().unwrap_or(-1) != 0 {
+                let build_error = String::from_utf8_lossy(&output.stderr);
+                println!("ERROR\t{} -> {}", flake_pkg_url, build_error);
+                return Err(build_error.into());
+            }
 
-        let build_output = String::from_utf8_lossy(&output.stdout);
-        let build_output = build_output.trim();
-        println!("RESULT\t{} -> {}", flake_pkg_url, build_output);
-        Ok(build_output.to_string())
+            let build_output = String::from_utf8_lossy(&output.stdout);
+            let build_output = build_output.trim();
+            println!("RESULT\t{} -> {}", flake_pkg_url, build_output);
+            Ok(build_output.to_string())
+        })
     }
 }
 
@@ -492,7 +549,7 @@ impl PackageBase for NixosConfigPackage {
         thread::spawn(move || {
             *self.status.0.write().unwrap() = PackageBuildStatus::Building;
 
-            match Self::build_static(self.flake_url.as_str()) {
+            match Self::build_static(self.flake_url.as_str(), &self.status) {
                 Ok(path) => {
                     *self.status.0.write().unwrap() = PackageBuildStatus::Success(path);
                 }
@@ -513,7 +570,16 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(serde_json::from_str::<AutoBuildOptions>(&config_data)?)
     };
 
+    let build_pool_size = if settings.n_build_threads == 0 {
+        num_cpus::get() as usize
+    } else {
+        settings.n_build_threads as usize
+    };
+
+    let build_sem = Arc::new(Semaphore::init(build_pool_size as usize));
+
     let repo_dir = settings.dir.join("repos");
+
     let build_repos = RepoList(VecArcWrapper::from(
         settings
             .repos
