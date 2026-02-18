@@ -41,7 +41,7 @@
       "build_depth": 5
     }
   ],
-  "dir": "/workspaces/nix_autobuild/data",
+  "dir": "data",
   "supported_architectures": [
     "x86_64-linux"
   ],

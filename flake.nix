@@ -25,7 +25,7 @@
         };
         naersk' = pkgs.callPackage naersk {};
 
-        rust-bin = pkgs.rust-bin.nightly."2025-04-15".default.override {
+        rust-bin = pkgs.rust-bin.nightly."2026-02-15".default.override {
           extensions = ["rust-analyzer" "rust-src" "clippy" "llvm-tools"];
           targets = ["wasm32-unknown-unknown"];
         };
@@ -41,14 +41,14 @@
         wasm-bindgen-cli = pkgs.buildWasmBindgenCli rec {
           src = pkgs.fetchCrate {
             pname = "wasm-bindgen-cli";
-            version = "0.2.106";
-            hash = "sha256-M6WuGl7EruNopHZbqBpucu4RWz44/MSdv6f0zkYw+44=";
+            version = "0.2.108";
+            hash = "sha256-UsuxILm1G6PkmVw0I/JF12CRltAfCJQFOaT4hFwvR8E=";
           };
 
           cargoDeps = pkgs.rustPlatform.fetchCargoVendor {
             inherit src;
             inherit (src) pname version;
-            hash = "sha256-ElDatyOwdKwHg3bNH/1pcxKI7LXkhsotlDPQjiLHBwA=";
+            hash = "sha256-iqQiWbsKlLBiJFeqIYiXo3cqxGLSjNM8SOWXGM9u43E=";
           };
         };
 
@@ -60,6 +60,8 @@
             ${wasm-bindgen-cli}/bin/wasm-bindgen --out-dir $out/dist --target web $out/bin/nix_autobuild.wasm
             cp -r $src/index.html $out/dist/
             cp -r $src/styles.css $out/dist/
+            cp -r $src/favicon.ico $out/dist/
+            cp -r $src/favicon.png $out/dist/
           '';
         };
 

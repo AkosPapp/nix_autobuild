@@ -3,6 +3,7 @@ target
 data
 **/target/
 **/dist/
+.direnv
 
 # Added by cargo
 

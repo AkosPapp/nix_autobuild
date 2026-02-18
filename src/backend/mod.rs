@@ -617,7 +617,8 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
     HttpServer::new(|| {
         App::new()
             .service(repos)
-            .service(nix_files)
+            .service(nix_store_files)
+            .service(store_files)
             .service(static_files)
     })
     .bind((settings.host.as_str(), settings.port))?
@@ -636,25 +637,21 @@ async fn repos() -> impl Responder {
     HttpResponse::Ok().body(json)
 }
 
-#[get("/nix/store/{path:.*}")]
-// serve file if available or list the nix store directory
-async fn nix_files(path: actix_web::web::Path<String>) -> actix_web::Result<HttpResponse> {
-    let file_path = format!("/nix/store/{}", path.into_inner());
+async fn server_nix_file(path: String) -> actix_web::Result<HttpResponse> {
+    println!("INFO\tRequested nix file: {}", path);
 
-    println!("INFO\tRequested nix file: {}", file_path);
-
-    let metadata = match std::fs::metadata(&file_path) {
+    let metadata = match std::fs::metadata(&path) {
         Ok(meta) => meta,
         Err(_) => return Err(actix_web::error::ErrorNotFound("404 Not Found")),
     };
 
     if metadata.is_file() {
-        match std::fs::read(&file_path) {
+        match std::fs::read(&path) {
             Ok(contents) => Ok(HttpResponse::Ok().body(contents)),
             Err(_) => Err(actix_web::error::ErrorNotFound("404 Not Found")),
         }
     } else if metadata.is_dir() {
-        match std::fs::read_dir(&file_path) {
+        match std::fs::read_dir(&path) {
             Ok(entries) => {
                 let mut listing = String::from("<html><body><h1>Directory listing</h1><ul>");
                 for entry in entries.flatten() {
@@ -663,7 +660,7 @@ async fn nix_files(path: actix_web::web::Path<String>) -> actix_web::Result<Http
                         let suffix = if is_dir { "/" } else { "" };
                         listing.push_str(&format!(
                             "<li><a href=\"{}/{}{}\">{}{}</a></li>",
-                            file_path, name, suffix, name, suffix
+                            path, name, suffix, name, suffix
                         ));
                     }
                 }
@@ -677,6 +674,20 @@ async fn nix_files(path: actix_web::web::Path<String>) -> actix_web::Result<Http
     } else {
         Err(actix_web::error::ErrorNotFound("404 Not Found"))
     }
+}
+
+#[get("/nix/store{path:.*}")]
+// serve file if available or list the nix store directory
+async fn nix_store_files(path: actix_web::web::Path<String>) -> actix_web::Result<HttpResponse> {
+    let full_path = format!("/nix/store{}", path.into_inner());
+    server_nix_file(full_path).await
+}
+
+#[get("/store{path:.*}")]
+// serve file if available or list the nix store directory
+async fn store_files(path: actix_web::web::Path<String>) -> actix_web::Result<HttpResponse> {
+    let full_path = format!("/nix/store{}", path.into_inner());
+    server_nix_file(full_path).await
 }
 
 #[get("/{path:.*}")]
