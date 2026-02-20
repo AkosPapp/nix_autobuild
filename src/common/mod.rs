@@ -42,6 +42,13 @@ pub struct Repo {
         default = "1"
     )]
     pub build_depth: u8,
+
+    #[nixos(
+        description = "Optional path to a credentials file. When set, the file must contain a single line with credentials in the format `username:password` (no quotes). If omitted or empty, no credentials are used.",
+        default = "\"\"",
+        example = "\"/path/to/credentials\""
+    )]
+    pub credentials_file: Option<String>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -72,10 +79,7 @@ pub struct AutoBuildOptions {
     )]
     pub host: String,
 
-    #[nixos(
-        description = "Port for the server to bind to",
-        default = "8080"
-    )]
+    #[nixos(description = "Port for the server to bind to", default = "8080")]
     pub port: u16,
 
     #[nixos(

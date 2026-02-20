@@ -28,6 +28,13 @@ in let
         default = 1;
       };
 
+      credentials_file = lib.mkOption {
+        type = types.nullOr types.str;
+        description = "Optional path to a credentials file. When set, the file must contain a single line with credentials in the format `username:password` (no quotes). If omitted or empty, no credentials are used.";
+        default = "";
+        example = "/path/to/credentials";
+      };
+
     };
   };
   autoBuildOptionsType = {

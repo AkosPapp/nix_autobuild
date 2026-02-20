@@ -4,6 +4,7 @@ data
 **/target/
 **/dist/
 .direnv
+akos01-nix-autobuild
 
 # Added by cargo
 

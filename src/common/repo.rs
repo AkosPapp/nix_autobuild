@@ -34,4 +34,8 @@ pub struct RepoInfo {
     #[cfg(not(target_arch = "wasm32"))]
     #[serde(skip)]
     pub settings: Arc<AutoBuildOptions>,
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[serde(skip)]
+    pub credentials: Option<String>,
 }

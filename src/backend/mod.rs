@@ -101,6 +101,17 @@ impl RepoInfoTrait for RepoInfo {
         for branch in &repo.branches {
             branch_commit_hashes.insert(branch.clone(), RwLockWrapper::new(Vec::new()));
         }
+        let credentials = if let Some(credentials_file) = &repo.credentials_file {
+            match std::fs::read_to_string(credentials_file) {
+                Ok(creds) => Some(creds.trim().to_string()),
+                Err(e) => {
+                    println!("ERROR reading credentials file {}: {}", credentials_file, e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
         Arc::new(RepoInfo {
             flake_url: format!("git+https://{}", repo.url),
             repo,
@@ -108,19 +119,29 @@ impl RepoInfoTrait for RepoInfo {
             branch_commit_hashes: branch_commit_hashes,
             commits: RwLockHashMapArc::new(RwLock::new(HashMap::new())),
             status: RwLockWrapper::new(RepoStatus::Idle),
+            credentials,
             settings,
         })
     }
 
     fn clone_repo(&self) -> Result<git2::Repository, git2::Error> {
         *self.status.0.write().unwrap() = RepoStatus::Cloning;
-        println!("CLONE\t{}", self.checkout_path.display());
-        let res = Repository::clone(
-            format!("https://{}", &self.repo.url).as_str(),
-            &self.checkout_path,
-        );
+        println!("CLONE\t{}", format!("https://{}", &self.repo.url));
+
+        let clone_url = if let Some(credentials) = &self.credentials {
+            format!("https://{}@{}", credentials, &self.repo.url)
+        } else {
+            format!("https://{}", &self.repo.url)
+        };
+        let res = Repository::clone(clone_url.as_str(), &self.checkout_path);
+
         *self.status.0.write().unwrap() = RepoStatus::Idle;
-        println!("CLONED\t{}", self.checkout_path.display());
+
+        match &res {
+            Ok(_) => println!("CLONE DONE\t{}", self.checkout_path.display()),
+            Err(e) => println!("CLONE ERROR\t{}: {}", self.checkout_path.display(), e),
+        };
+
         res
     }
 
@@ -132,7 +153,10 @@ impl RepoInfoTrait for RepoInfo {
             Err(_) => self.clone_repo(),
         };
         *self.status.0.write().unwrap() = RepoStatus::Idle;
-        println!("OPEN DONE\t{}", self.checkout_path.display());
+        match &res {
+            Ok(_) => println!("OPENED\t{}", self.checkout_path.display()),
+            Err(e) => println!("OPEN ERROR\t{}: {}", self.checkout_path.display(), e),
+        };
         res
     }
 
@@ -147,17 +171,30 @@ impl RepoInfoTrait for RepoInfo {
             .filter_map(|r| r.target().map(|t| (r.name().unwrap_or("").to_string(), t)))
             .collect::<std::collections::HashMap<_, _>>();
 
-        remote.fetch(&self.repo.branches, Some(&mut fetch_options), None)?;
+        remote
+            .fetch(&self.repo.branches, Some(&mut fetch_options), None)
+            .map_err(|err| {
+                eprintln!("PULL ERROR\t{}: {}", self.checkout_path.display(), err);
+                err
+            })?;
 
         let after_refs = repository
-            .references()?
+            .references()
+            .map_err(|err| {
+                eprintln!("PULL ERROR\t{}: {}", self.checkout_path.display(), err);
+                err
+            })?
             .filter_map(|r| r.ok())
             .filter_map(|r| r.target().map(|t| (r.name().unwrap_or("").to_string(), t)))
             .collect::<std::collections::HashMap<_, _>>();
 
         let has_changes = before_refs != after_refs;
         *self.status.0.write().unwrap() = RepoStatus::Idle;
-        println!("PULL DONE\t{}", self.checkout_path.display());
+
+        match has_changes {
+            true => println!("PULL DONE\t{}", self.checkout_path.display()),
+            false => println!("PULL NO CHANGES\t{}", self.checkout_path.display()),
+        }
         Ok(has_changes)
     }
 
@@ -206,13 +243,28 @@ impl RepoInfoTrait for RepoInfo {
 
     fn thread_loop(self: Arc<RepoInfo>) -> Result<(), Box<dyn std::error::Error>> {
         // clone repo if not exists
-        let repo = self.clone_or_open()?;
+        let repo = self.clone_or_open().map_err(|err| {
+            eprintln!(
+                "ERROR cloning or opening repo {}: {}",
+                self.checkout_path.display(),
+                err
+            );
+            err
+        })?;
 
         loop {
             println!("POLL\t{}", self.checkout_path.display());
             *self.status.0.write().unwrap() = RepoStatus::Polling;
 
-            repo.branches(Some(git2::BranchType::Remote))?
+            repo.branches(Some(git2::BranchType::Remote))
+                .map_err(|err| {
+                    eprintln!(
+                        "ERROR listing branches for repo {}: {}",
+                        self.checkout_path.display(),
+                        err
+                    );
+                    err
+                })?
                 .for_each(|branch_result| {
                     let Ok((branch, _)) = branch_result else {
                         return;
@@ -494,10 +546,21 @@ pub trait PackageBase: Send + Sync {
 
     fn build(self: Arc<Self>);
 
-    fn build_static(flake_pkg_url: &str, status: &RwLockWrapper<PackageBuildStatus>) -> Result<String, Box<dyn std::error::Error>> {
-        status.0.write().unwrap().clone_from(&PackageBuildStatus::WaitingForBuild);
+    fn build_static(
+        flake_pkg_url: &str,
+        status: &RwLockWrapper<PackageBuildStatus>,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        status
+            .0
+            .write()
+            .unwrap()
+            .clone_from(&PackageBuildStatus::WaitingForBuild);
         Semaphore::get_sem().execute(|| {
-            status.0.write().unwrap().clone_from(&PackageBuildStatus::Building);
+            status
+                .0
+                .write()
+                .unwrap()
+                .clone_from(&PackageBuildStatus::Building);
             println!("BUILD\t{}", flake_pkg_url);
             let output = std::process::Command::new("nix")
                 .arg("build")
