@@ -1,20 +1,12 @@
 {
   "repos": [
     {
-      "url": "github.com/PPAPSONKA/nix",
-      "poll_interval_sec": 30,
+      "url": "github.com/AkosPapp/nix",
+      "poll_interval_sec": 1,
       "branches": [
         "main"
       ],
-      "build_depth": 5
-    },
-    {
-      "url": "github.com/PPAPSONKA/nixvim",
-      "poll_interval_sec": 30,
-      "branches": [
-        "main"
-      ],
-      "build_depth": 5
+      "build_depth": 2
     },
     {
       "url": "github.com/AkosPapp/nix_autobuild",
@@ -22,23 +14,16 @@
       "branches": [
         "main"
       ],
-      "build_depth": 5
+      "build_depth": 2
     },
     {
-      "url": "github.com/AkosPapp/rs_reverse_proxy",
+      "url": "git.robo4you.at/flyby/blender-sdg",
+      "credentials_file": "akos01-nix-autobuild",
       "poll_interval_sec": 30,
       "branches": [
         "main"
       ],
-      "build_depth": 5
-    },
-    {
-      "url": "git.robo4you.at/akos.papp/DA",
-      "poll_interval_sec": 30,
-      "branches": [
-        "main"
-      ],
-      "build_depth": 5
+      "build_depth": 1
     }
   ],
   "dir": "data",
@@ -47,5 +32,8 @@
   ],
   "n_build_threads": 0,
   "host": "127.0.0.1",
-  "port": 8085
+  "port": 8085,
+  "builders": [
+    "ssh-ng://root@akos01"
+  ]
 }

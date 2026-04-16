@@ -1,0 +1,18 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "trunk watch",
+            "type": "shell",
+            "command": "trunk watch",
+            "isBackground": true
+        },
+        {
+            "label": "run backend",
+            "type": "shell",
+            "command": "cargo r --target x86_64-unknown-linux-gnu -- config.json"
+        }
+    ]
+}

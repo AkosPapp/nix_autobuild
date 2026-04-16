@@ -1,18 +1,32 @@
-use std::collections::BTreeMap;
-
 use crate::{
     RepoList,
     commit::CommitInfo,
-    package::{self, PackageBuildStatus, PackageEnum},
-    repo::{self, RepoInfo},
+    package::{PackageBuildStatus, PackageEnum},
+    repo::RepoInfo,
 };
 use gloo_timers::callback::Interval;
-use serde::de;
+use gloo_timers::future::TimeoutFuture;
+use gluesql::gluesql_memory_storage::MemoryStorage;
+use gluesql::prelude::*;
 use serde_json;
+use std::sync::Arc;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::Response;
+use web_sys::{
+    Event, HtmlElement, HtmlTextAreaElement, KeyboardEvent, Response, console, js_sys::Date,
+};
 use yew::prelude::*;
+
+const COPY_ICON: &str = "\u{f0c5}";
+const DEFAULT_SQL_QUERY: &str = r#"SELECT repo, repo_status, package_path, package_status, result, commit_message
+FROM package_list as p
+WHERE package_status not like 'UnsupportedArchitecture' and commit_timestamp_millis = (
+    SELECT MAX(commit_timestamp_millis)
+    FROM package_list as inner
+    WHERE p.repo = inner.repo and p.package_path = inner.package_path
+)
+ORDER BY repo, package_path"#;
 
 // Fetch the repo list via Fetch API and return deserialized RepoList
 async fn fetch_repos() -> Result<RepoList, String> {
@@ -40,479 +54,6 @@ async fn fetch_repos() -> Result<RepoList, String> {
         .ok_or_else(|| "response not text".to_string())?;
 
     serde_json::from_str(&text).map_err(|e| format!("failed to parse json: {e}"))
-}
-
-fn repos(repos: &RepoList, props: &Props) -> Html {
-    let all_packages: Vec<Package> = repos
-        .0
-        .0
-        .iter()
-        .flat_map(|repo| {
-            // Collect packages from each repo
-            repo.commits.0.iter().flat_map(|(_hash, commit)| {
-                commit
-                    .packages
-                    .0
-                    .iter()
-                    .map(|pkg| Package { repo, commit, pkg })
-            })
-        })
-        .collect();
-
-    // group repo -> package_name -> branch -> commit -> arch -> package info
-    let mut grouped: BTreeMap<
-        String, // repo url
-        (
-            &RepoInfo,
-            BTreeMap<
-                String, // package name
-                BTreeMap<
-                    String, // branch name
-                    BTreeMap<
-                        String, // commit hash
-                        BTreeMap<
-                            String, // arch
-                            &Package,
-                        >,
-                    >,
-                >,
-            >,
-        ),
-    > = BTreeMap::new();
-
-    // Initialize all repos in the map (even if they have no packages)
-    for repo in repos.0.0.iter() {
-        grouped.insert(repo.repo.url.clone(), (repo, BTreeMap::new()));
-    }
-
-    for package in &all_packages {
-        let repo_url = package.repo.repo.url.clone();
-        let arch = match package.pkg {
-            PackageEnum::Derivation(arc_wrapper) => arc_wrapper.0.arch.clone(),
-            PackageEnum::NixosConfig(_arc_wrapper) => "NONE".to_string(),
-        };
-        let package_name = match package.pkg {
-            PackageEnum::Derivation(arc_wrapper) => arc_wrapper.0.get_no_arch_name(),
-            PackageEnum::NixosConfig(arc_wrapper) => arc_wrapper.0.path.clone(),
-        };
-
-        // Find which branches contain this commit
-        for (branch_name, commit_hashes) in &package.repo.branch_commit_hashes {
-            if commit_hashes.0.contains(&package.commit.hash) {
-                // Entry already exists from initialization above
-                if let Some(entry) = grouped.get_mut(&repo_url) {
-                    entry
-                        .1
-                        .entry(package_name.clone())
-                        .or_default()
-                        .entry(branch_name.clone())
-                        .or_default()
-                        .entry(package.commit.hash.clone())
-                        .or_default()
-                        .insert(arch.clone(), package);
-                }
-            }
-        }
-    }
-
-    html! {
-        <div class="stack">
-            { for grouped.iter().map(|(repo_name, repo)| {
-                repo_html(repo_name, repo, props)
-            }) }
-        </div>
-    }
-}
-
-// group repo -> package_name -> branch -> commit -> arch -> package info
-fn repo_html(
-    repo_name: &str,
-    repo_data: &(
-        &RepoInfo,
-        BTreeMap<String, BTreeMap<String, BTreeMap<String, BTreeMap<String, &Package<'_>>>>>,
-    ),
-    props: &Props,
-) -> Html {
-    let status_text = format!("{:?}", repo_data.0.status.0);
-    let status_class = match status_text.as_str() {
-        s if s.contains("Success") => "status-success",
-        s if s.contains("Failed") || s.contains("Failure") => "status-failed",
-        s if s.contains("Building") || s.contains("Running") => "status-building",
-        s if s.contains("Pending") || s.contains("Queued") || s.contains("WaitingForBuild") => {
-            "status-pending"
-        }
-        _ => "status-unknown",
-    };
-    let is_open = props.repo_name.as_deref() == Some(repo_name);
-    let link_url = if is_open {
-        Props::default().get_url().unwrap_or_default()
-    } else {
-        props
-            .with_repo_name(repo_name.to_string())
-            .get_url()
-            .unwrap_or_default()
-    };
-
-    html! {
-        <section class="card">
-            <a href={link_url}>
-                <div class="repo-header">
-                    <h2>{ repo_name }</h2>
-                    <span class={classes!("status-indicator", status_class)}>{ status_text }</span>
-                </div>
-                <p class="meta">{ &repo_data.0.flake_url }</p>
-            </a>
-            if is_open {
-                { for repo_data.1.iter().map(|(package_name, branches)| {
-                    package_name_html(package_name, branches, props)
-                }) }
-            }
-        </section>
-    }
-}
-
-fn package_name_html(
-    package_name: &String,
-    branches: &BTreeMap<String, BTreeMap<String, BTreeMap<String, &Package<'_>>>>,
-    props: &Props,
-) -> Html {
-    let is_open = props.package_name.as_deref() == Some(package_name);
-    let link_url = if is_open {
-        props.clear_from_package().get_url().unwrap_or_default()
-    } else {
-        props
-            .with_package(package_name.clone())
-            .get_url()
-            .unwrap_or_default()
-    };
-
-    html! {
-        <div class="card">
-            <a href={link_url}>
-                <h3>{ package_name }</h3>
-            </a>
-            if is_open {
-                { for branches.iter().map(|(branch_name, commits)| {
-                    branch_html(branch_name, commits, props)
-                }) }
-            }
-        </div>
-    }
-}
-
-fn branch_html(
-    branch_name: &String,
-    commits: &BTreeMap<String, BTreeMap<String, &Package<'_>>>,
-    props: &Props,
-) -> Html {
-    let is_open = props.branch.as_deref() == Some(branch_name);
-    let link_url = if is_open {
-        props.clear_from_branch().get_url().unwrap_or_default()
-    } else {
-        props
-            .with_branch(branch_name.clone())
-            .get_url()
-            .unwrap_or_default()
-    };
-
-    // Sort commits by timestamp (newest first)
-    let mut sorted_commits: Vec<_> = commits.iter().collect();
-    sorted_commits.sort_by(|(_, archs_a), (_, archs_b)| {
-        let timestamp_a = archs_a
-            .values()
-            .next()
-            .map(|p| p.commit.unix_secs)
-            .unwrap_or(0);
-        let timestamp_b = archs_b
-            .values()
-            .next()
-            .map(|p| p.commit.unix_secs)
-            .unwrap_or(0);
-        timestamp_b.cmp(&timestamp_a) // Reverse order for newest first
-    });
-
-    html! {
-        <div class="card">
-            <a href={link_url}>
-                <h4>{ branch_name }</h4>
-            </a>
-            if is_open {
-                <ul>
-                    { for sorted_commits.iter().map(|(commit_hash, archs)| {
-                        commit_html(commit_hash, archs, props)
-                    }) }
-                </ul>
-            }
-        </div>
-    }
-}
-
-fn commit_html(
-    commit_hash: &String,
-    archs: &BTreeMap<String, &Package<'_>>,
-    props: &Props,
-) -> Html {
-    let short_hash = &commit_hash[..7.min(commit_hash.len())];
-    let commit_message = archs
-        .values()
-        .next()
-        .map(|p| p.commit.message.as_str())
-        .unwrap_or("no commit message");
-    let is_open = props.commit_hash.as_deref() == Some(commit_hash);
-    let link_url = if is_open {
-        props.clear_from_commit().get_url().unwrap_or_default()
-    } else {
-        props
-            .with_commit(commit_hash.clone())
-            .get_url()
-            .unwrap_or_default()
-    };
-
-    html! {
-        <li class="card">
-            <a href={link_url}>
-                { format!("{} - {}", short_hash, commit_message) }
-            </a>
-            if is_open {
-                <div>
-                    { for archs.iter().map(|(arch, package)| {
-                        arch_html(arch, package, props)
-                    }) }
-                </div>
-            }
-        </li>
-    }
-}
-
-fn arch_html(arch: &String, package: &Package<'_>, props: &Props) -> Html {
-    let (_name, pkg_type, status_text, result) = match package.pkg {
-        PackageEnum::Derivation(arc_wrapper) => (
-            arc_wrapper.0.name.clone(),
-            arc_wrapper.0.pkg_type.clone(),
-            format!("{:?}", arc_wrapper.0.status.0),
-            match &arc_wrapper.0.status.0 {
-                PackageBuildStatus::Success(path) => Some(path.clone()),
-                _ => None,
-            },
-        ),
-        PackageEnum::NixosConfig(arc_wrapper) => (
-            arc_wrapper.0.pkg_type.clone(),
-            "NixOS Config".to_string(),
-            format!("{:?}", arc_wrapper.0.status.0),
-            match (&arc_wrapper.0.status.0) {
-                PackageBuildStatus::Success(path) => Some(path.clone()),
-                _ => None,
-            },
-        ),
-    };
-
-    let status_class = match status_text.as_str() {
-        s if s.contains("Success") => "status-success",
-        s if s.contains("Failed") || s.contains("Failure") => "status-failed",
-        s if s.contains("Building") || s.contains("Running") => "status-building",
-        s if s.contains("Pending") || s.contains("Queued") || s.contains("WaitingForBuild") => {
-            "status-pending"
-        }
-        _ => "status-unknown",
-    };
-
-    let is_selected = props.arch.as_deref() == Some(arch);
-    let link_url = if is_selected {
-        props.clear_arch().get_url().unwrap_or_default()
-    } else {
-        props.with_arch(arch.clone()).get_url().unwrap_or_default()
-    };
-
-    html! {
-        <div class="card">
-            <a href={link_url}>
-                <div class="pkg-header">
-                    <p>{ format!("{} ({})", arch, pkg_type) }</p>
-                    <span class={classes!("status-indicator", status_class)}>{ status_text }</span>
-                </div>
-                if let Some(result_path) = result {
-                    <p class="meta">
-                        <a href={result_path.clone()} class="result-link">{ "→ Build Result" }</a>
-                    </p>
-                }
-            </a>
-        </div>
-    }
-}
-
-#[derive(PartialEq, Clone, Debug)]
-pub struct Props {
-    pub repo_name: Option<String>,
-    pub package_name: Option<String>,
-    pub branch: Option<String>,
-    pub commit_hash: Option<String>,
-    pub arch: Option<String>,
-}
-
-impl Props {
-    pub fn from_url() -> Self {
-        let window = match web_sys::window() {
-            Some(w) => w,
-            None => return Self::default(),
-        };
-
-        let location = window.location();
-        let search = match location.search() {
-            Ok(s) => s,
-            Err(_) => return Self::default(),
-        };
-
-        // Parse URLSearchParams
-        let url_params = match web_sys::UrlSearchParams::new_with_str(&search) {
-            Ok(params) => params,
-            Err(_) => return Self::default(),
-        };
-
-        Self {
-            repo_name: url_params.get("repo"),
-            package_name: url_params.get("package"),
-            branch: url_params.get("branch"),
-            commit_hash: url_params.get("commit"),
-            arch: url_params.get("arch"),
-        }
-    }
-
-    pub fn get_url(&self) -> Option<String> {
-        let mut params = vec![];
-
-        let window = match web_sys::window() {
-            Some(w) => w,
-            None => return None,
-        };
-
-        let location = window.location();
-
-        if let Some(repo) = &self.repo_name {
-            params.push(format!("repo={}", repo));
-        }
-        if let Some(package) = &self.package_name {
-            params.push(format!("package={}", package));
-        }
-        if let Some(branch) = &self.branch {
-            params.push(format!("branch={}", branch));
-        }
-        if let Some(commit) = &self.commit_hash {
-            params.push(format!("commit={}", commit));
-        }
-        if let Some(arch) = &self.arch {
-            params.push(format!("arch={}", arch));
-        }
-
-        Some(format!(
-            "{}//{}{}?{}",
-            location.protocol().ok()?,
-            location.host().ok()?,
-            location.pathname().ok()?,
-            params.join("&")
-        ))
-    }
-
-    pub fn with_repo_name(&self, repo_name: String) -> Self {
-        Self {
-            repo_name: Some(repo_name),
-            package_name: None,
-            branch: None,
-            commit_hash: None,
-            arch: None,
-        }
-    }
-
-    pub fn with_package(&self, package_name: String) -> Self {
-        Self {
-            repo_name: self.repo_name.clone(),
-            package_name: Some(package_name),
-            branch: None,
-            commit_hash: None,
-            arch: None,
-        }
-    }
-
-    pub fn with_branch(&self, branch: String) -> Self {
-        Self {
-            repo_name: self.repo_name.clone(),
-            package_name: self.package_name.clone(),
-            branch: Some(branch),
-            commit_hash: None,
-            arch: None,
-        }
-    }
-
-    pub fn with_commit(&self, commit_hash: String) -> Self {
-        Self {
-            repo_name: self.repo_name.clone(),
-            package_name: self.package_name.clone(),
-            branch: self.branch.clone(),
-            commit_hash: Some(commit_hash),
-            arch: None,
-        }
-    }
-
-    pub fn with_arch(&self, arch: String) -> Self {
-        Self {
-            repo_name: self.repo_name.clone(),
-            package_name: self.package_name.clone(),
-            branch: self.branch.clone(),
-            commit_hash: self.commit_hash.clone(),
-            arch: Some(arch),
-        }
-    }
-
-    pub fn clear_from_package(&self) -> Self {
-        Self {
-            repo_name: self.repo_name.clone(),
-            package_name: None,
-            branch: None,
-            commit_hash: None,
-            arch: None,
-        }
-    }
-
-    pub fn clear_from_branch(&self) -> Self {
-        Self {
-            repo_name: self.repo_name.clone(),
-            package_name: self.package_name.clone(),
-            branch: None,
-            commit_hash: None,
-            arch: None,
-        }
-    }
-
-    pub fn clear_from_commit(&self) -> Self {
-        Self {
-            repo_name: self.repo_name.clone(),
-            package_name: self.package_name.clone(),
-            branch: self.branch.clone(),
-            commit_hash: None,
-            arch: None,
-        }
-    }
-
-    pub fn clear_arch(&self) -> Self {
-        Self {
-            repo_name: self.repo_name.clone(),
-            package_name: self.package_name.clone(),
-            branch: self.branch.clone(),
-            commit_hash: self.commit_hash.clone(),
-            arch: None,
-        }
-    }
-}
-
-impl Default for Props {
-    fn default() -> Self {
-        Self {
-            repo_name: None,
-            package_name: None,
-            branch: None,
-            commit_hash: None,
-            arch: None,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -585,183 +126,797 @@ fn TableRow(props: &TableRowProps) -> Html {
     }
 }
 
-fn format_repo_debug(repo: &RepoInfo) -> String {
-    format!(
-        "RepoInfo {{\n  flake_url: {:?},\n  repo: {:#?},\n  checkout_path: {:?},\n  branch_commit_hashes: {:#?},\n  commits: <{} commits (excluded from display)>,\n  status: {:?},\n}}",
-        repo.flake_url,
-        repo.repo,
-        repo.checkout_path,
-        repo.branch_commit_hashes,
-        repo.commits.0.len(),
-        repo.status.0
-    )
+#[derive(Clone, PartialEq)]
+pub struct SqlResult {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<String>>,
 }
 
-fn format_commit_debug(commit: &CommitInfo) -> String {
-    format!(
-        "CommitInfo {{\n  message: {:?},\n  flake_url: {:?},\n  hash: {:?},\n  packages: <{} packages (excluded from display)>,\n  unix_secs: {},\n  status: {:?},\n}}",
-        commit.message,
-        commit.flake_url,
-        commit.hash,
-        commit.packages.0.len(),
-        commit.unix_secs,
-        commit.status.0
-    )
+fn escape_sql(value: &str) -> String {
+    value.replace('\'', "''")
 }
 
-fn repos_table(repos: &RepoList) -> Html {
-    let mut package_list: Vec<(&RepoInfo, &CommitInfo, &PackageEnum)> = repos
-        .0
-        .0
-        .iter()
-        .flat_map(|repo| {
-            repo.commits.0.iter().flat_map(move |(_hash, commit)| {
-                commit.packages.0.iter().map(move |pkg| (repo, commit, pkg))
-            })
-        })
-        .collect();
+fn highlight_sql(sql: &str) -> Vec<Html> {
+    const KEYWORDS: [&str; 37] = [
+        "SELECT", "FROM", "WHERE", "AND", "OR", "LIMIT", "ORDER", "BY", "GROUP", "HAVING", "AS",
+        "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "ON", "DISTINCT", "COUNT", "SUM", "AVG", "MIN",
+        "MAX", "INSERT", "INTO", "VALUES", "UPDATE", "SET", "DELETE", "CREATE", "TABLE", "DROP",
+        "ALTER", "ADD", "NULL", "IS", "NOT",
+    ];
 
-    // Sort by: repo name, package name, branch, commit time (desc), arch
-    package_list.sort_by(|(repo_a, commit_a, pkg_a), (repo_b, commit_b, pkg_b)| {
-        let repo_name_a = &repo_a.repo.url;
-        let repo_name_b = &repo_b.repo.url;
+    let mut out: Vec<Html> = Vec::new();
+    let mut chars = sql.chars().peekable();
 
-        let pkg_name_a = match pkg_a {
-            PackageEnum::Derivation(arc_wrapper) => arc_wrapper.0.get_no_arch_name(),
-            PackageEnum::NixosConfig(arc_wrapper) => arc_wrapper.0.path.clone(),
-        };
-        let pkg_name_b = match pkg_b {
-            PackageEnum::Derivation(arc_wrapper) => arc_wrapper.0.get_no_arch_name(),
-            PackageEnum::NixosConfig(arc_wrapper) => arc_wrapper.0.path.clone(),
-        };
-
-        let branch_a = repo_a
-            .branch_commit_hashes
-            .iter()
-            .find_map(|(branch, hashes)| {
-                if hashes.0.contains(&commit_a.hash) {
-                    Some(branch.clone())
+    while let Some(ch) = chars.peek().copied() {
+        if ch.is_ascii_whitespace() {
+            let mut buf = String::new();
+            while let Some(c) = chars.peek().copied() {
+                if c.is_ascii_whitespace() {
+                    buf.push(c);
+                    chars.next();
                 } else {
-                    None
+                    break;
                 }
-            })
-            .unwrap_or_else(|| "-".to_string());
-        let branch_b = repo_b
-            .branch_commit_hashes
-            .iter()
-            .find_map(|(branch, hashes)| {
-                if hashes.0.contains(&commit_b.hash) {
-                    Some(branch.clone())
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_else(|| "-".to_string());
+            }
+            out.push(Html::from(buf));
+            continue;
+        }
 
-        let arch_a = match pkg_a {
-            PackageEnum::Derivation(arc_wrapper) => arc_wrapper.0.arch.clone(),
-            PackageEnum::NixosConfig(_arc_wrapper) => "N/A".to_string(),
-        };
-        let arch_b = match pkg_b {
-            PackageEnum::Derivation(arc_wrapper) => arc_wrapper.0.arch.clone(),
-            PackageEnum::NixosConfig(_arc_wrapper) => "N/A".to_string(),
-        };
-
-        repo_name_a
-            .cmp(repo_name_b)
-            .then_with(|| pkg_name_a.cmp(&pkg_name_b))
-            .then_with(|| branch_a.cmp(&branch_b))
-            .then_with(|| commit_b.unix_secs.cmp(&commit_a.unix_secs)) // Descending (newest first)
-            .then_with(|| arch_a.cmp(&arch_b))
-    });
-
-    html! {
-        <table style="width: 100%; border-collapse: collapse; background: var(--card); box-shadow: var(--shadow); border-radius: var(--radius); overflow: hidden;">
-            <thead>
-                <tr style="background: var(--card-strong); border-bottom: 2px solid rgba(255, 255, 255, 0.08);">
-                    <th style="padding: 12px; text-align: left; font-weight: 600; color: var(--text);">{ "Repository" }</th>
-                    <th style="padding: 12px; text-align: left; font-weight: 600; color: var(--text);">{ "Package Path" }</th>
-                    <th style="padding: 12px; text-align: left; font-weight: 600; color: var(--text);">{ "Branch" }</th>
-                    <th style="padding: 12px; text-align: left; font-weight: 600; color: var(--text);">{ "Commit" }</th>
-                    <th style="padding: 12px; text-align: center; font-weight: 600; color: var(--text);">{ "Status" }</th>
-                </tr>
-            </thead>
-            <tbody>
-                { for package_list.iter().map(|(repo, commit, pkg)| {
-                    let package_path = match pkg {
-                        PackageEnum::Derivation(arc_wrapper) => arc_wrapper.0.path.clone(),
-                        PackageEnum::NixosConfig(arc_wrapper) => arc_wrapper.0.path.clone(),
-                    };
-                    let branch = repo.branch_commit_hashes.iter()
-                        .find_map(|(branch, hashes)| {
-                            if hashes.0.contains(&commit.hash) {
-                                Some(branch.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or_else(|| "-".to_string());
-
-                    let commit_first_line = commit.message.lines().next().unwrap_or("");
-                    let commit_display = if commit_first_line.len() > 10 {
-                        format!("{}...", &commit_first_line[..10])
-                    } else {
-                        commit_first_line.to_string()
-                    };
-
-                    let status_text = match pkg {
-                        PackageEnum::Derivation(arc_wrapper) => format!("{:?}", arc_wrapper.0.status.0),
-                        PackageEnum::NixosConfig(arc_wrapper) => format!("{:?}", arc_wrapper.0.status.0),
-                    };
-
-                    let status_class = match status_text.as_str() {
-                        s if s.contains("Success") => "status-success",
-                        s if s.contains("Failed") || s.contains("Failure") => "status-failed",
-                        s if s.contains("Building") || s.contains("Running") => "status-building",
-                        s if s.contains("Pending") || s.contains("Queued") || s.contains("WaitingForBuild") => "status-pending",
-                        _ => "status-unknown",
-                    };
-
-                    html! {
-                        <TableRow
-                            repo_url={repo.repo.url.clone()}
-                            package_path={package_path}
-                            branch={branch}
-                            commit_message={commit_display}
-                            status_class={status_class.to_string()}
-                            repo_debug={format_repo_debug(repo)}
-                            commit_debug={format_commit_debug(commit)}
-                            pkg_debug={format!("{:#?}", pkg)}
-                        />
+        if ch == '-' {
+            let mut look = chars.clone();
+            look.next();
+            if let Some('-') = look.next() {
+                let mut buf = String::new();
+                buf.push('-');
+                buf.push('-');
+                chars.next();
+                chars.next();
+                while let Some(c) = chars.peek().copied() {
+                    buf.push(c);
+                    chars.next();
+                    if c == '\n' {
+                        break;
                     }
-                }) }
-            </tbody>
-        </table>
+                }
+                out.push(html! { <span class="sql-comment">{ buf }</span> });
+                continue;
+            }
+        }
+
+        if ch == '/' {
+            let mut look = chars.clone();
+            look.next();
+            if let Some('*') = look.next() {
+                let mut buf = String::new();
+                buf.push('/');
+                buf.push('*');
+                chars.next();
+                chars.next();
+                while let Some(c) = chars.next() {
+                    buf.push(c);
+                    if c == '*' {
+                        if let Some('/') = chars.peek().copied() {
+                            buf.push('/');
+                            chars.next();
+                            break;
+                        }
+                    }
+                }
+                out.push(html! { <span class="sql-comment">{ buf }</span> });
+                continue;
+            }
+        }
+
+        if ch == '\'' {
+            let mut buf = String::new();
+            buf.push('\'');
+            chars.next();
+            while let Some(c) = chars.next() {
+                buf.push(c);
+                if c == '\'' {
+                    if let Some('\'') = chars.peek().copied() {
+                        buf.push('\'');
+                        chars.next();
+                        continue;
+                    }
+                    break;
+                }
+            }
+            out.push(html! { <span class="sql-str">{ buf }</span> });
+            continue;
+        }
+
+        if ch.is_ascii_digit() {
+            let mut buf = String::new();
+            while let Some(c) = chars.peek().copied() {
+                if c.is_ascii_digit() || c == '.' {
+                    buf.push(c);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            out.push(html! { <span class="sql-num">{ buf }</span> });
+            continue;
+        }
+
+        if ch.is_ascii_alphabetic() || ch == '_' {
+            let mut buf = String::new();
+            while let Some(c) = chars.peek().copied() {
+                if c.is_ascii_alphanumeric() || c == '_' {
+                    buf.push(c);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            let upper = buf.to_ascii_uppercase();
+            if KEYWORDS.contains(&upper.as_str()) {
+                out.push(html! { <span class="sql-kw">{ buf }</span> });
+            } else {
+                out.push(html! { <span class="sql-ident">{ buf }</span> });
+            }
+            continue;
+        }
+
+        let mut buf = String::new();
+        buf.push(ch);
+        chars.next();
+        out.push(html! { <span class="sql-op">{ buf }</span> });
+    }
+
+    out
+}
+
+fn render_sql_value(
+    column: &str,
+    value: &str,
+    copy_handler: &Callback<(String, String)>,
+    copy_token: &Option<String>,
+) -> Html {
+    let copied_value = value.to_string();
+    match column.to_lowercase().as_str() {
+        "repo" => {
+            let token = format!("repo:{}", copied_value);
+            let token_for_button = token.clone();
+            let url = if value.starts_with("http://") || value.starts_with("https://") {
+                value.to_string()
+            } else {
+                format!("https://{}", value)
+            };
+            html! {
+                <td style="padding: 10px 12px; color: var(--text); white-space: nowrap; min-width: 0;">
+                    /* This inner div handles the layout without breaking the table logic */
+                    <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
+                        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto;">
+                            <a href={url.clone()} target="_blank" rel="noreferrer" style="color: var(--accent);">{ value }</a>
+                        </span>
+                        <span style="position: relative; display: inline-flex; align-items: center; flex-shrink: 0;">
+                            <button
+                                type="button"
+                                onclick={copy_handler.reform(move |_| (copied_value.clone(), token_for_button.clone()))}
+                                class="copy-button"
+                                style="background: transparent; border: none; color: var(--accent); cursor: pointer;"
+                            >
+                                { COPY_ICON }
+                            </button>
+                            { if copy_token.as_ref() == Some(&token) {
+                                html! {
+                                    <span style="position: absolute; top: -28px; right: 0; background: rgba(15, 23, 52, 0.95); color: var(--accent); padding: 4px 8px; border-radius: 6px; font-size: 0.8rem; white-space: nowrap; z-index: 10;">
+                                        { "Copied" }
+                                    </span>
+                                }
+                            } else {
+                                html! {}
+                            }}
+                        </span>
+                    </div>
+                </td>
+            }
+        }
+        "package_status" => {
+            let status_class = match value.to_lowercase().as_str() {
+                s if s.contains("success") => "status-success",
+                s if s.contains("failed")
+                    || s.contains("failure")
+                    || s.contains("unsupportedarchitecture") =>
+                {
+                    "status-failed"
+                }
+                s if s.contains("building") || s.contains("running") => "status-building",
+                s if s.contains("pending")
+                    || s.contains("queued")
+                    || s.contains("waitingforbuild") =>
+                {
+                    "status-pending"
+                }
+                _ => "status-unknown",
+            };
+            html! {
+                <td style="padding: 10px 12px;">
+                    <span class={classes!("status-indicator", status_class)}>{ value }</span>
+                </td>
+            }
+        }
+        "repo_status" | "commit_status" => {
+            let status_class = match value.to_lowercase().as_str() {
+                s if s.contains("success") => "status-success",
+                s if s.contains("failed")
+                    || s.contains("failure")
+                    || s.contains("unsupportedarchitecture") =>
+                {
+                    "status-failed"
+                }
+                s if s.contains("building")
+                    || s.contains("running")
+                    || s.contains("pulling")
+                    || s.contains("cloning")
+                    || s.contains("opening")
+                    || s.contains("polling")
+                    || s.contains("gettingpackages") =>
+                {
+                    "status-building"
+                }
+                s if s.contains("idle")
+                    || s.contains("pending")
+                    || s.contains("queued")
+                    || s.contains("waitingforbuild") =>
+                {
+                    "status-pending"
+                }
+                _ => "status-unknown",
+            };
+            html! {
+                <td style="padding: 10px 12px;">
+                    <span class={classes!("status-indicator", status_class)}>{ value }</span>
+                </td>
+            }
+        }
+        "repo_flake_url" | "commit_flake_url" | "package_flake_url" => {
+            let token = format!("{}:{}", column, copied_value);
+            let token_for_button = token.clone();
+            html! {
+                <td style="padding: 10px 12px;">
+                    <div style="display: flex; gap: 8px; align-items: center; white-space: nowrap; min-width: 0;">
+                        <span style="color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto;">{ value }</span>
+                        <span style="position: relative; display: inline-flex; align-items: center;">
+                            <button type="button" onclick={copy_handler.reform(move |_| (copied_value.clone(), token_for_button.clone()))} class="copy-button" style="background: transparent; border: none; color: var(--accent); cursor: pointer;">{ COPY_ICON }</button>
+                            { if copy_token.as_ref() == Some(&token) {
+                                html! {
+                                    <span style="position: absolute; top: -28px; right: 0; background: rgba(15, 23, 52, 0.95); color: var(--accent); padding: 4px 8px; border-radius: 6px; font-size: 0.8rem; white-space: nowrap; z-index: 10;">{ "Copied" }</span>
+                                }
+                            } else {
+                                html! {}
+                            }}
+                        </span>
+                    </div>
+                </td>
+            }
+        }
+        "result" => {
+            if value.is_empty() {
+                html! { <td style="padding: 10px 12px; color: var(--muted); white-space: nowrap;">{ "-" }</td> }
+            } else {
+                let linkable = value.starts_with("http://")
+                    || value.starts_with("https://")
+                    || value.starts_with("file://")
+                    || value.starts_with('/')
+                    || value.starts_with("./")
+                    || value.starts_with("../");
+
+                let is_error_value = value.to_lowercase().starts_with("failed:")
+                    || value
+                        .to_lowercase()
+                        .starts_with("unsupported architecture:");
+                let text_color = if is_error_value {
+                    "#f87171"
+                } else {
+                    "var(--text)"
+                };
+
+                if linkable {
+                    let href = value.to_string();
+                    let copied_value = value.to_string();
+                    let token = format!("result:{}", copied_value);
+                    let token_for_button = token.clone();
+                    html! {
+                        <td style="padding: 10px 12px;">
+                            <div style="display: flex; gap: 8px; align-items: center; white-space: nowrap; min-width: 0;">
+                                <a href={href.clone()} target="_blank" rel="noreferrer" style="color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto;">{ value }</a>
+                                <span style="position: relative; display: inline-flex; align-items: center;">
+                                    <button type="button" onclick={copy_handler.reform(move |_| (copied_value.clone(), token_for_button.clone()))} class="copy-button" style="background: transparent; border: none; color: var(--accent); cursor: pointer;">{ COPY_ICON }</button>
+                                    { if copy_token.as_ref() == Some(&token) {
+                                        html! {
+                                            <span style="position: absolute; top: -28px; right: 0; background: rgba(15, 23, 52, 0.95); color: var(--accent); padding: 4px 8px; border-radius: 6px; font-size: 0.8rem; white-space: nowrap; z-index: 10;">{ "Copied" }</span>
+                                        }
+                                    } else {
+                                        html! {}
+                                    }}
+                                </span>
+                            </div>
+                        </td>
+                    }
+                } else {
+                    let token = format!("result:{}", copied_value);
+                    let token_for_button = token.clone();
+                    html! {
+                        <td style={format!("padding: 10px 12px; color: {};", text_color)}>
+                            <div style="display: flex; gap: 8px; align-items: center; white-space: nowrap; min-width: 0;">
+                                <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto;">{ value }</span>
+                                <span style="position: relative; display: inline-flex; align-items: center;">
+                                    <button type="button" onclick={copy_handler.reform(move |_| (copied_value.clone(), token_for_button.clone()))} class="copy-button" style="background: transparent; border: none; color: var(--accent); cursor: pointer;">{ COPY_ICON }</button>
+                                    { if copy_token.as_ref() == Some(&token) {
+                                        html! {
+                                            <span style="position: absolute; top: -28px; right: 0; background: rgba(15, 23, 52, 0.95); color: var(--accent); padding: 4px 8px; border-radius: 6px; font-size: 0.8rem; white-space: nowrap; z-index: 10;">{ "Copied" }</span>
+                                        }
+                                    } else {
+                                        html! {}
+                                    }}
+                                </span>
+                            </div>
+                        </td>
+                    }
+                }
+            }
+        }
+        _ => {
+            html! { <td style="padding: 10px 12px; color: var(--text); white-space: nowrap;">{ value }</td> }
+        }
+    }
+}
+
+fn build_package_rows(
+    repos: &RepoList,
+) -> Vec<(
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+)> {
+    let mut package_list: Vec<(
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+    )> = vec![];
+
+    for repo in repos.0.0.iter() {
+        for (_hash, commit) in repo.commits.0.iter() {
+            for pkg in commit.packages.0.iter() {
+                let repo_url = repo.repo.url.clone();
+                let repo_flake_url = repo.flake_url.clone();
+                let repo_status = format!("{:?}", &repo.status.0);
+                let commit_hash = commit.hash.clone();
+                let commit_flake_url = commit.flake_url.clone();
+                let commit_status = format!("{:?}", &commit.status.0);
+                let commit_timestamp = format_commit_timestamp(commit.unix_secs);
+                let commit_timestamp_millis = commit.unix_secs.saturating_mul(1000).to_string();
+
+                let (
+                    package_path,
+                    package_type,
+                    package_description,
+                    package_flake_url,
+                    arch,
+                    result,
+                    status_text,
+                ) = match pkg {
+                    PackageEnum::Derivation(arc_wrapper) => {
+                        let status = arc_wrapper.0.status.0.clone();
+                        let result = match &status {
+                            PackageBuildStatus::Success(path) => path.clone(),
+                            PackageBuildStatus::Failed(error) => format!("failed: {}", error),
+                            PackageBuildStatus::UnsupportedArchitecture(arch) => {
+                                format!("unsupported architecture: {}", arch)
+                            }
+                            _ => String::new(),
+                        };
+                        let status_text = status_label(&status);
+                        (
+                            arc_wrapper.0.path.clone(),
+                            arc_wrapper.0.pkg_type.clone(),
+                            arc_wrapper.0.description.clone(),
+                            arc_wrapper.0.flake_url.clone(),
+                            arc_wrapper.0.arch.clone(),
+                            result,
+                            status_text,
+                        )
+                    }
+                    PackageEnum::NixosConfig(arc_wrapper) => {
+                        let status = arc_wrapper.0.status.0.clone();
+                        let result = match &status {
+                            PackageBuildStatus::Success(path) => path.clone(),
+                            PackageBuildStatus::Failed(error) => format!("failed: {}", error),
+                            PackageBuildStatus::UnsupportedArchitecture(arch) => {
+                                format!("unsupported architecture: {}", arch)
+                            }
+                            _ => String::new(),
+                        };
+                        let status_text = status_label(&status);
+                        (
+                            arc_wrapper.0.path.clone(),
+                            arc_wrapper.0.pkg_type.clone(),
+                            String::new(),
+                            arc_wrapper.0.flake_url.clone(),
+                            "N/A".to_string(),
+                            result,
+                            status_text,
+                        )
+                    }
+                };
+
+                let branch = repo
+                    .branch_commit_hashes
+                    .iter()
+                    .find_map(|(branch, hashes)| {
+                        if hashes.0.contains(&commit.hash) {
+                            Some(branch.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| "-".to_string());
+
+                package_list.push((
+                    repo_url,
+                    repo_flake_url,
+                    repo_status,
+                    package_path,
+                    package_type,
+                    package_description,
+                    package_flake_url,
+                    branch,
+                    commit_hash,
+                    commit.message.clone(),
+                    commit_flake_url,
+                    commit_status,
+                    commit_timestamp,
+                    commit_timestamp_millis,
+                    arch,
+                    result,
+                    status_text,
+                ));
+            }
+        }
+    }
+
+    package_list
+}
+
+fn value_to_string(value: &Value) -> String {
+    match value {
+        Value::Bool(v) => v.to_string(),
+        Value::I8(v) => v.to_string(),
+        Value::I16(v) => v.to_string(),
+        Value::I32(v) => v.to_string(),
+        Value::I64(v) => v.to_string(),
+        Value::I128(v) => v.to_string(),
+        Value::U8(v) => v.to_string(),
+        Value::U16(v) => v.to_string(),
+        Value::U32(v) => v.to_string(),
+        Value::U64(v) => v.to_string(),
+        Value::U128(v) => v.to_string(),
+        Value::F32(v) => v.to_string(),
+        Value::F64(v) => v.to_string(),
+        Value::Decimal(v) => v.to_string(),
+        Value::Str(v) => v.clone(),
+        Value::Bytea(v) => format!("BYTEA({:?})", v),
+        Value::Inet(v) => v.to_string(),
+        Value::Date(v) => v.to_string(),
+        Value::Timestamp(v) => v.to_string(),
+        Value::Time(v) => v.to_string(),
+        Value::Interval(v) => format!("{:?}", v),
+        Value::Uuid(v) => v.to_string(),
+        Value::Map(v) => format!("{:?}", v),
+        Value::List(v) => format!("{:?}", v),
+        Value::Point(v) => format!("{:?}", v),
+        Value::Null => "NULL".to_string(),
+    }
+}
+
+fn status_label(status: &PackageBuildStatus) -> String {
+    match status {
+        PackageBuildStatus::Idle => "Idle".to_string(),
+        PackageBuildStatus::UnsupportedArchitecture(_) => "UnsupportedArchitecture".to_string(),
+        PackageBuildStatus::WaitingForBuild => "WaitingForBuild".to_string(),
+        PackageBuildStatus::Building => "Building".to_string(),
+        PackageBuildStatus::Success(_) => "Success".to_string(),
+        PackageBuildStatus::Failed(_) => "Failed".to_string(),
+    }
+}
+
+fn format_commit_timestamp(unix_secs: i64) -> String {
+    let millis = (unix_secs as f64) * 1000.0;
+    let date = Date::new(&JsValue::from_f64(millis));
+    date.to_locale_string("en-US", &JsValue::undefined()).into()
+}
+
+async fn execute_sql_query(repos: &RepoList, sql: &str) -> Result<SqlResult, String> {
+    let mut glue = Glue::new(MemoryStorage::default());
+
+    glue.execute(
+        "CREATE TABLE package_list (repo TEXT, repo_flake_url TEXT, repo_status TEXT, package_path TEXT, package_type TEXT, package_description TEXT, package_flake_url TEXT, branch TEXT, commit_hash TEXT, commit_message TEXT, commit_flake_url TEXT, commit_status TEXT, commit_timestamp TEXT, commit_timestamp_millis TEXT, arch TEXT, result TEXT, package_status TEXT);",
+    )
+    .await
+    .map_err(|e| format!("SQL engine error: {e}"))?;
+
+    for (
+        repo,
+        repo_flake_url,
+        repo_status,
+        package_path,
+        package_type,
+        package_description,
+        package_flake_url,
+        branch,
+        commit_hash,
+        commit_message,
+        commit_flake_url,
+        commit_status,
+        commit_timestamp,
+        commit_timestamp_millis,
+        arch,
+        result,
+        status,
+    ) in build_package_rows(repos)
+    {
+        let insert = format!(
+            "INSERT INTO package_list VALUES ('{}','{}','{}','{}','{}','{}','{}','{}','{}','{}','{}','{}','{}','{}','{}','{}','{}');",
+            escape_sql(&repo),
+            escape_sql(&repo_flake_url),
+            escape_sql(&repo_status),
+            escape_sql(&package_path),
+            escape_sql(&package_type),
+            escape_sql(&package_description),
+            escape_sql(&package_flake_url),
+            escape_sql(&branch),
+            escape_sql(&commit_hash),
+            escape_sql(&commit_message),
+            escape_sql(&commit_flake_url),
+            escape_sql(&commit_status),
+            escape_sql(&commit_timestamp),
+            escape_sql(&commit_timestamp_millis),
+            escape_sql(&arch),
+            escape_sql(&result),
+            escape_sql(&status),
+        );
+        glue.execute(&insert)
+            .await
+            .map_err(|e| format!("SQL engine error: {e}"))?;
+    }
+
+    let payloads = glue
+        .execute(sql)
+        .await
+        .map_err(|e| format!("SQL error: {e}"))?;
+    let payload = payloads
+        .into_iter()
+        .last()
+        .ok_or_else(|| "No SQL payload returned".to_string())?;
+
+    match payload {
+        Payload::Select { labels, rows } => {
+            let columns: Vec<String> = labels.into_iter().collect();
+            let rows = rows
+                .into_iter()
+                .map(|row| row.into_iter().map(|val| value_to_string(&val)).collect())
+                .collect();
+            Ok(SqlResult { columns, rows })
+        }
+        payload => Err(format!("Unsupported result payload: {payload:?}")),
     }
 }
 
 #[function_component]
 fn App() -> Html {
-    let data = use_state(|| None::<Result<RepoList, String>>);
-    let props = Props::from_url();
+    let repolist = use_state(|| None::<Result<Arc<RepoList>, String>>);
+    let sql_query = use_state(|| DEFAULT_SQL_QUERY.to_string());
+    let active_query_ref = use_mut_ref(|| DEFAULT_SQL_QUERY.to_string());
+    let sql_result = use_state(|| None::<Result<SqlResult, String>>);
+    let copy_token = use_state(|| None::<String>);
+    let fetch_error = use_state(|| None::<String>);
+    let sql_pre_ref = use_node_ref();
+
+    let on_sql_scroll = {
+        let sql_pre_ref = sql_pre_ref.clone();
+        Callback::from(move |event: Event| {
+            if let Some(textarea) = event
+                .target()
+                .and_then(|target| target.dyn_into::<HtmlTextAreaElement>().ok())
+            {
+                if let Some(pre) = sql_pre_ref.cast::<HtmlElement>() {
+                    pre.set_scroll_top(textarea.scroll_top());
+                    pre.set_scroll_left(textarea.scroll_left());
+                }
+            }
+        })
+    };
+
+    let copy_handler = {
+        let copy_token = copy_token.clone();
+        Callback::from(move |(value, token): (String, String)| {
+            let copy_token = copy_token.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Some(window) = web_sys::window() {
+                    let clipboard = window.navigator().clipboard();
+                    let promise = clipboard.write_text(&value);
+                    let _ = JsFuture::from(promise).await;
+                }
+                copy_token.set(Some(token));
+                TimeoutFuture::new(1500).await;
+                copy_token.set(None);
+            });
+        })
+    };
+
+    let on_sql_input = {
+        let sql_query = sql_query.clone();
+        Callback::from(move |event: InputEvent| {
+            if let Some(textarea) = event
+                .target()
+                .and_then(|target| target.dyn_into::<HtmlTextAreaElement>().ok())
+            {
+                sql_query.set(textarea.value());
+            }
+        })
+    };
+
+    let run_sql = {
+        let data = repolist.clone();
+        let sql_query = sql_query.clone();
+        let active_query_ref = active_query_ref.clone();
+        let sql_result = sql_result.clone();
+        let fetch_error = fetch_error.clone();
+        Callback::from(move |_: ()| {
+            let data = data.clone();
+            let query = (*sql_query).clone();
+            let active_query_ref = active_query_ref.clone();
+            let sql_result = sql_result.clone();
+            let fetch_error = fetch_error.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                console::log_1(&format!("run_sql: {}", query).into());
+                *active_query_ref.borrow_mut() = query.clone();
+                let result = match &*data {
+                    Some(Ok(list)) => execute_sql_query(list, &query).await,
+                    Some(Err(err)) => Err(err.clone()),
+                    None => fetch_error
+                        .as_ref()
+                        .cloned()
+                        .map(Err)
+                        .unwrap_or_else(|| Err("No data available yet".to_string())),
+                };
+                sql_result.set(Some(result));
+            });
+        })
+    };
+
+    let run_sql_click = {
+        let run_sql = run_sql.clone();
+        Callback::from(move |_: MouseEvent| run_sql.emit(()))
+    };
+
+    let on_sql_keydown = {
+        let sql_query = sql_query.clone();
+        let run_sql = run_sql.clone();
+        Callback::from(move |event: KeyboardEvent| {
+            let key = event.key();
+            if key == "Tab" {
+                if let Some(textarea) = event
+                    .target()
+                    .and_then(|target| target.dyn_into::<HtmlTextAreaElement>().ok())
+                {
+                    event.prevent_default();
+                    let value = textarea.value();
+                    let start = textarea.selection_start().ok().flatten().unwrap_or(0) as usize;
+                    let end = textarea
+                        .selection_end()
+                        .ok()
+                        .flatten()
+                        .unwrap_or(start as u32) as usize;
+                    let mut next = String::with_capacity(value.len() + 1);
+                    next.push_str(&value[..start]);
+                    next.push('\t');
+                    next.push_str(&value[end..]);
+                    sql_query.set(next);
+                    let cursor = (start + 1) as u32;
+                    let _ = textarea.set_selection_range(cursor, cursor);
+                }
+                return;
+            }
+
+            if key == "Enter" && (event.shift_key() || event.ctrl_key() || event.meta_key()) {
+                event.prevent_default();
+                run_sql.emit(());
+            }
+        })
+    };
 
     {
-        let data = data.clone();
+        let data = repolist.clone();
+        let active_query_ref = active_query_ref.clone();
+        let sql_result = sql_result.clone();
+        let fetch_error_state = fetch_error.clone();
         // Fetch immediately, then refresh every second
         use_effect_with((), move |_| {
             wasm_bindgen_futures::spawn_local({
                 let data = data.clone();
+                let active_query_ref = active_query_ref.clone();
+                let sql_result = sql_result.clone();
+                let fetch_error = fetch_error_state.clone();
                 async move {
                     let res = fetch_repos().await;
-                    data.set(Some(res));
+                    console::log_1(&"Initial fetch".into());
+                    match res {
+                        Ok(list) => {
+                            fetch_error.set(None);
+                            let list = Arc::new(list);
+                            data.set(Some(Ok(Arc::clone(&list))));
+                            let query = active_query_ref.borrow().clone();
+                            console::log_1(&format!("auto_sql: {}", query).into());
+                            let sql_result = sql_result.clone();
+                            wasm_bindgen_futures::spawn_local(async move {
+                                let result = execute_sql_query(&list, &query).await;
+                                sql_result.set(Some(result));
+                            });
+                        }
+                        Err(err) => {
+                            fetch_error.set(Some(err));
+                        }
+                    }
                 }
             });
 
             let interval = Interval::new(1000, move || {
                 let data = data.clone();
+                let active_query_ref = active_query_ref.clone();
+                let sql_result = sql_result.clone();
+                let fetch_error = fetch_error_state.clone();
                 wasm_bindgen_futures::spawn_local(async move {
                     let res = fetch_repos().await;
-                    data.set(Some(res));
+                    match res {
+                        Ok(list) => {
+                            console::log_1(&"Refresh fetch".into());
+                            fetch_error.set(None);
+                            let list = Arc::new(list);
+                            data.set(Some(Ok(Arc::clone(&list))));
+                            let query = active_query_ref.borrow().clone();
+                            console::log_1(&format!("auto_sql: {}", query).into());
+                            let sql_result = sql_result.clone();
+                            wasm_bindgen_futures::spawn_local(async move {
+                                let result = execute_sql_query(&list, &query).await;
+                                sql_result.set(Some(result));
+                            });
+                        }
+                        Err(err) => {
+                            fetch_error.set(Some(err));
+                        }
+                    }
                 });
             });
 
@@ -769,15 +924,66 @@ fn App() -> Html {
         });
     }
 
-    let body = match &*data {
-        Some(Ok(list)) => repos(&list, &props),
-        Some(Err(err)) => html! { <p class="meta error">{ format!("Error: {}", err) }</p> },
-        None => html! { <p class="meta">{ "Loading data..." }</p> },
-    };
-
-    let table = match &*data {
-        Some(Ok(list)) => repos_table(&list),
-        _ => html! { <p class="meta">{ "No table to display" }</p> },
+    let sql_table = html! {
+        <section class="card">
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                <details class="sql-details">
+                    <summary class="sql-summary">{ "SQL query" }</summary>
+                    <div class="sql-panel">
+                        <label class="meta" for="sql-query">{ "SQL query for package list" }</label>
+                        <div class="sql-editor">
+                            <pre ref={sql_pre_ref} class="sql-highlight">{ for highlight_sql(&*sql_query) }</pre>
+                            <textarea
+                                id="sql-query"
+                                rows={5}
+                                class="sql-input"
+                                value={(*sql_query).clone()}
+                                oninput={on_sql_input}
+                                onscroll={on_sql_scroll}
+                                onkeydown={on_sql_keydown}
+                            />
+                        </div>
+                        {
+                            if let Some(err) = &*fetch_error {
+                                html! { <p class="meta error">{ format!("Fetch error: {}", err) }</p> }
+                            } else {
+                                html! {}
+                            }
+                        }
+                        <button onclick={run_sql_click} class="sql-run">{ "Run SQL" }</button>
+                    </div>
+                </details>
+                {
+                    match &*sql_result {
+                        None => html! { <p class="meta">{ "Run the query to display results." }</p> },
+                        Some(Ok(result)) => html! {
+                            <div style="overflow-x: auto;">
+                                <table class="sql-results-table" style="border-collapse: collapse; margin-top: 12px; min-width: max-content;">
+                                    <thead>
+                                        <tr style="background: var(--card-strong);">
+                                            { for result.columns.iter().map(|column| html! {
+                                                <th style="padding: 10px 12px; text-align: left; color: var(--accent); white-space: nowrap;">{ column }</th>
+                                            }) }
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        { for result.rows.iter().map(|row| html! {
+                                            <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
+                                                { for result.columns.iter().enumerate().map(|(idx, column)| {
+                                                    let value = row.get(idx).map(|s| s.as_str()).unwrap_or("");
+                                                    render_sql_value(column, value, &copy_handler, &*copy_token)
+                                                }) }
+                                            </tr>
+                                        }) }
+                                    </tbody>
+                                </table>
+                            </div>
+                        },
+                        Some(Err(error)) => html! { <p class="meta error">{ error }</p> },
+                    }
+                }
+            </div>
+        </section>
     };
 
     html! {
@@ -785,12 +991,8 @@ fn App() -> Html {
             <main class="page">
                 <header class="page-header">
                     <p class="kicker">{ "Nix Autobuild" }</p>
-                    <h1>{ "Repository Overview" }</h1>
-                    <p class="meta">{ "Auto-refreshing every second" }</p>
                 </header>
-                { body }
-                { table }
-                { format!("{:?}", props) }
+                { sql_table }
             </main>
         </div>
     }

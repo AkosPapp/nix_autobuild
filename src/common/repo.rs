@@ -1,18 +1,22 @@
 #[cfg(target_arch = "wasm32")]
 use serde::Deserialize;
-use serde::Serialize;
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    sync::{Arc, RwLock},
-};
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::AutoBuildOptions;
+#[cfg(not(target_arch = "wasm32"))]
+use serde::Serialize;
+// #[cfg(not(target_arch = "wasm32"))]
+// std::sync::Arc;
+
+use crate::Repo;
 use crate::serialize::RwLockHashMapArc;
-use crate::{AutoBuildOptions, Repo};
 use crate::{
     common::commit::{CommitInfo, RepoStatus},
     serialize::RwLockWrapper,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+use std::{collections::HashMap, path::PathBuf};
 
 unsafe impl Send for RepoStatus {}
 unsafe impl Sync for RepoStatus {}

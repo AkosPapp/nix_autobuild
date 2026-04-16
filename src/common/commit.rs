@@ -1,8 +1,14 @@
-use std::sync::{Arc, RwLock};
+#[cfg(not(target_arch = "wasm32"))]
+use serde::Serialize;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
+#[cfg(target_arch = "wasm32")]
+use serde::Deserialize;
 
-use crate::{commit, package::PackageEnum, repo::RepoInfo, serialize::RwLockWrapper};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::repo::RepoInfo;
+use crate::{package::PackageEnum, serialize::RwLockWrapper};
 
 #[cfg_attr(target_arch = "wasm32", derive(Deserialize))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(Serialize))]
@@ -26,7 +32,6 @@ pub struct CommitInfo {
 unsafe impl Send for CommitInfo {}
 unsafe impl Sync for CommitInfo {}
 
-
 #[cfg_attr(target_arch = "wasm32", derive(Deserialize))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(Serialize))]
 #[derive(Debug)]
@@ -37,7 +42,6 @@ pub enum RepoStatus {
     Pulling,
     Polling,
 }
-
 
 #[cfg_attr(target_arch = "wasm32", derive(Deserialize))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(Serialize))]

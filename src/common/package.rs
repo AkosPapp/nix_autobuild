@@ -1,8 +1,14 @@
+use crate::serialize::{ArcWrapper, RwLockWrapper};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::commit::CommitInfo;
+#[cfg(not(target_arch = "wasm32"))]
+use serde::Serialize;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
-use crate::commit::CommitInfo;
-use crate::serialize::{ArcWrapper, RwLockWrapper};
-use serde::{Deserialize, Serialize};
+#[cfg(target_arch = "wasm32")]
+use serde::Deserialize;
 
 #[cfg_attr(target_arch = "wasm32", derive(Deserialize))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(Serialize, Clone))]

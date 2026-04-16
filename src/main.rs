@@ -1,5 +1,4 @@
 #[cfg(not(target_arch = "wasm32"))]
-
 #[actix_web::main]
 async fn main() {
     use nix_autobuild::backend::main;

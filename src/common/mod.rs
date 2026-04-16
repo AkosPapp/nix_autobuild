@@ -14,10 +14,13 @@ pub use regex;
 
 use serde::{Deserialize, Serialize};
 use serde_nixos::NixosType;
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
 // Import macro exported at crate root
-use crate::{generate_nixos_module, repo::RepoInfo, serialize::VecArcWrapper};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::generate_nixos_module;
+
+use crate::{repo::RepoInfo, serialize::VecArcWrapper};
 
 #[derive(Deserialize, Serialize, Clone, Debug, NixosType)]
 pub struct Repo {
@@ -87,6 +90,13 @@ pub struct AutoBuildOptions {
         default = "0"
     )]
     pub n_build_threads: usize,
+
+    #[nixos(
+        description = "List of builders to use for building. If empty, uses the default Nix builders configured on the system.",
+        default = "[]",
+        example = "[\"ssh-ng://builder@host1\"]"
+    )]
+    pub builders: Vec<String>,
 }
 
 pub const ARCHITECTURES: [&str; 24] = [

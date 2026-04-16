@@ -29,13 +29,23 @@ gloo-net = "0.6.0"
 gloo-timers = { version = "0.3.0", features = ["futures"] }
 wasm-bindgen-futures = "0.4.56"
 wasm-bindgen = "0.2.106"
-web-sys = { version = "0.3.73", features = [
+web-sys = { version = "0.3.85", features = [
     "Window",
+    "Navigator",
     "Response",
     "Request",
     "Headers",
+    "Event",
+    "HtmlElement",
+    "HtmlTextAreaElement",
+    "KeyboardEvent",
+    "Clipboard",
+    "MouseEvent",
 ] }
 yew = { version = "0.21", features = ["csr"] }
+gluesql = { version = "0.19.0", default-features = false, features = [
+    "gluesql_memory_storage",
+] }
 serde = "1.0.228"
 serde-nixos = "0.1.1"
 serde_json = "1.0"
@@ -51,7 +61,6 @@ opt-level = 'z'
 # opt-level = 's'
 # link time optimization using using whole-program analysis
 lto = true
-
 
 
 [lints.clippy]

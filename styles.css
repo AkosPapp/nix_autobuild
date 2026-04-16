@@ -1,15 +1,21 @@
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
 
 :root {
-    --bg: #0b1021;
-    --card: #0f172a;
-    --card-strong: #111a34;
-    --text: #e8ecf6;
-    --muted: #99a3c2;
-    --accent: #7cf1c9;
-    --accent-strong: #44d2a1;
-    --border: rgba(255, 255, 255, 0.08);
-    --shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+    color-scheme: dark;
+    --bg: #161720;
+    --card: #1d1f2b;
+    --card-strong: #242637;
+    --text: #f8f8f2;
+    --muted: #8b96c9;
+    --accent: #8be9fd;
+    --accent-strong: #50fa7b;
+    --accent-pink: #ff79c6;
+    --accent-purple: #bd93f9;
+    --accent-yellow: #f1fa8c;
+    --accent-orange: #ffb86c;
+    --accent-red: #ff5555;
+    --border: rgba(248, 248, 242, 0.12);
+    --shadow: 0 18px 48px rgba(0, 0, 0, 0.65);
     --radius: 10px;
     --gap: 18px;
 }
@@ -22,11 +28,121 @@
 
 body {
     font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
-    background: radial-gradient(circle at 20% 20%, rgba(124, 241, 201, 0.08), transparent 25%),
-        radial-gradient(circle at 80% 0%, rgba(96, 165, 250, 0.12), transparent 25%),
-        linear-gradient(135deg, #0b1229, #0b1021 55%);
+    background-color: var(--bg);
+    background: radial-gradient(circle at 20% 20%, rgba(139, 233, 253, 0.1), transparent 45%),
+        radial-gradient(circle at 80% 0%, rgba(189, 147, 249, 0.1), transparent 45%),
+        linear-gradient(135deg, #12131c, var(--bg) 60%);
     color: var(--text);
     min-height: 100vh;
+}
+
+.copy-button {
+    font-family: "Font Awesome 6 Free", "Font Awesome 6 Solid", "Segoe UI Symbol", sans-serif;
+    font-weight: 900;
+    line-height: 1;
+}
+
+.sql-editor {
+    position: relative;
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(68, 71, 90, 0.45);
+    overflow: hidden;
+}
+
+.sql-details {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: rgba(68, 71, 90, 0.28);
+    padding: 10px 12px;
+}
+
+.sql-summary {
+    cursor: pointer;
+    list-style: none;
+    color: var(--accent-pink);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 12px;
+}
+
+.sql-summary::-webkit-details-marker {
+    display: none;
+}
+
+.sql-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-top: 12px;
+}
+
+.sql-run {
+    padding: 12px 18px;
+    border-radius: 10px;
+    border: none;
+    background: var(--accent-purple);
+    color: #232531;
+    font-weight: 700;
+    width: fit-content;
+}
+
+.sql-highlight,
+.sql-input {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    padding: 12px;
+    margin: 0;
+    border: none;
+    background: transparent;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.sql-highlight {
+    color: var(--text);
+    pointer-events: none;
+    min-height: 120px;
+}
+
+.sql-input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    color: transparent;
+    caret-color: var(--text);
+    resize: vertical;
+    outline: none;
+}
+
+.sql-kw {
+    color: var(--accent-purple);
+    font-weight: 600;
+}
+
+.sql-str {
+    color: var(--accent-yellow);
+}
+
+.sql-num {
+    color: var(--accent-orange);
+}
+
+.sql-comment {
+    color: var(--muted);
+    font-style: italic;
+}
+
+.sql-op {
+    color: var(--accent-pink);
+}
+
+.sql-ident {
+    color: var(--text);
 }
 
 .app-bg {
@@ -35,7 +151,8 @@ body {
 }
 
 .page {
-    max-width: 1120px;
+    width: 100vw;
+    max-width: none;
     margin: 0 auto;
     padding: 0 28px;
 }
@@ -55,7 +172,7 @@ body {
 .kicker {
     text-transform: uppercase;
     letter-spacing: 0.14em;
-    color: var(--accent);
+    color: var(--accent-pink);
     font-weight: 600;
     font-size: 13px;
 }
@@ -67,7 +184,7 @@ p,
 }
 
 .error {
-    color: #f87171;
+    color: var(--accent-red);
 }
 
 .stack {
@@ -81,7 +198,7 @@ p,
     border-radius: var(--radius);
     box-shadow: var(--shadow);
     padding: 10px;
-    margin: 10px;
+    margin: 4px;
 }
 
 .repo-card {
@@ -131,9 +248,9 @@ p,
 }
 
 .status-pill {
-    background: rgba(124, 241, 201, 0.12);
-    border: 1px solid rgba(124, 241, 201, 0.5);
-    color: var(--accent);
+    background: rgba(80, 250, 123, 0.16);
+    border: 1px solid rgba(80, 250, 123, 0.6);
+    color: #50fa7b;
 }
 
 .packages {
@@ -164,7 +281,7 @@ p,
 }
 
 .branch-column {
-    background: rgba(255, 255, 255, 0.02);
+    background: rgba(68, 71, 90, 0.32);
     border: 1px solid var(--border);
     border-radius: calc(var(--radius) - 6px);
     padding: 14px;
@@ -189,7 +306,7 @@ p,
 }
 
 .commit-card {
-    background: rgba(255, 255, 255, 0.02);
+    background: rgba(68, 71, 90, 0.32);
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 12px 12px 10px;
@@ -214,7 +331,7 @@ p,
 }
 
 .status-line {
-    color: var(--accent);
+    color: var(--accent-strong);
     font-weight: 600;
 }
 
@@ -239,27 +356,6 @@ p,
     color: var(--accent);
 }
 
-a {
-    text-decoration: none;
-    color: inherit;
-}
-
-.repo-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.repo-header h2 {
-    margin: 0;
-}
-
-.pkg-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
 .pkg-header p {
     margin: 0;
 }
@@ -270,42 +366,59 @@ a {
 }
 
 .status-indicator {
-    padding: 4px 10px;
-    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    border-radius: 999px;
     font-size: 12px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
 }
 
+.copy-button,
+.result-link,
+.sql-results-table th,
+.sql-results-table td a {
+    color: var(--accent);
+}
+
+.sql-results-table th {
+    color: var(--accent-purple);
+}
+
+.sql-results-table td {
+    color: var(--text);
+}
+
 .status-success {
-    background: rgba(34, 197, 94, 0.15);
-    color: #4ade80;
-    border: 1px solid rgba(34, 197, 94, 0.3);
+    background: rgba(80, 250, 123, 0.28);
+    color: #50fa7b;
+    border: 1px solid rgba(80, 250, 123, 0.6);
 }
 
 .status-failed {
-    background: rgba(239, 68, 68, 0.15);
-    color: #f87171;
-    border: 1px solid rgba(239, 68, 68, 0.3);
+    background: rgba(255, 85, 85, 0.3);
+    color: #ff5555;
+    border: 1px solid rgba(255, 85, 85, 0.7);
 }
 
 .status-building {
-    background: rgba(59, 130, 246, 0.15);
-    color: #60a5fa;
-    border: 1px solid rgba(59, 130, 246, 0.3);
+    background: rgba(139, 233, 253, 0.28);
+    color: #8be9fd;
+    border: 1px solid rgba(139, 233, 253, 0.7);
 }
 
 .status-pending {
-    background: rgba(251, 191, 36, 0.15);
-    color: #fbbf24;
-    border: 1px solid rgba(251, 191, 36, 0.3);
+    background: rgba(255, 184, 108, 0.28);
+    color: #ffb86c;
+    border: 1px solid rgba(255, 184, 108, 0.7);
 }
 
 .status-unknown {
-    background: rgba(156, 163, 175, 0.15);
-    color: #9ca3af;
-    border: 1px solid rgba(156, 163, 175, 0.3);
+    background: rgba(98, 114, 164, 0.35);
+    color: #6272a4;
+    border: 1px solid rgba(98, 114, 164, 0.6);
 }
 
 .table-row-hover {
@@ -313,7 +426,35 @@ a {
 }
 
 .table-row-hover:hover {
-    background-color: rgba(124, 241, 201, 0.08) !important;
+    background-color: rgba(68, 71, 90, 0.75) !important;
+}
+
+.status-indicator.status-building {
+    box-shadow: 0 0 0 1px rgba(139, 233, 253, 0.35);
+}
+
+.status-indicator.status-failed {
+    box-shadow: 0 0 0 1px rgba(255, 85, 85, 0.35);
+}
+
+.status-indicator.status-success {
+    box-shadow: 0 0 0 1px rgba(80, 250, 123, 0.35);
+}
+
+.status-indicator.status-pending {
+    box-shadow: 0 0 0 1px rgba(255, 184, 108, 0.35);
+}
+
+.sql-results-table {
+    table-layout: auto;
+    width: auto;
+    min-width: max-content;
+}
+
+.sql-results-table th,
+.sql-results-table td {
+    min-width: 0;
+    white-space: nowrap;
 }
 
 @media (max-width: 640px) {

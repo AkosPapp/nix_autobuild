@@ -1,11 +1,15 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{Arc, RwLock},
-};
+use std::collections::HashMap;
 
 #[cfg(target_arch = "wasm32")]
 use serde::Deserialize;
-use serde::{Serialize, de::DeserializeOwned};
+
+#[cfg(not(target_arch = "wasm32"))]
+use serde::Serialize;
+#[cfg(not(target_arch = "wasm32"))]
+use std::{
+    collections::HashSet,
+    sync::{Arc, RwLock},
+};
 
 // Newtype for Arc<T>
 #[cfg_attr(target_arch = "wasm32", derive(Deserialize))]

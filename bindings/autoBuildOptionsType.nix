@@ -76,6 +76,13 @@ in let
       default = 0;
     };
 
+    builders = lib.mkOption {
+      type = types.listOf types.str;
+      description = "List of builders to use for building. If empty, uses the default Nix builders configured on the system.";
+      default = [];
+      example = ["ssh-ng://builder@host1"];
+    };
+
     };
   };
 in autoBuildOptionsType
