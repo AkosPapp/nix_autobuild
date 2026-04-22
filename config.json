@@ -2,7 +2,15 @@
   "repos": [
     {
       "url": "github.com/AkosPapp/nix",
-      "poll_interval_sec": 1,
+      "poll_interval_sec": 30,
+      "branches": [
+        "main"
+      ],
+      "build_depth": 2
+    },
+    {
+      "url": "github.com/AkosPapp/nixvim",
+      "poll_interval_sec": 30,
       "branches": [
         "main"
       ],
@@ -17,23 +25,37 @@
       "build_depth": 2
     },
     {
+      "url": "git.robo4you.at/akos.papp/DA",
+      "poll_interval_sec": 30,
+      "branches": [
+        "main"
+      ],
+      "build_depth": 2
+    },
+    {
       "url": "git.robo4you.at/flyby/blender-sdg",
       "credentials_file": "akos01-nix-autobuild",
       "poll_interval_sec": 30,
       "branches": [
         "main"
       ],
-      "build_depth": 1
+      "build_depth": 2
     }
   ],
   "dir": "data",
   "supported_architectures": [
-    "x86_64-linux"
+    "x86_64-linux",
+    "aarch64-linux"
   ],
   "n_build_threads": 0,
   "host": "127.0.0.1",
   "port": 8085,
-  "builders": [
+  "copy_to": [
     "ssh-ng://root@akos01"
+  ],
+  "copy_to_substitute_on_destination": true,
+  "enable_gcroots": true,
+  "builders": [
+    "builder@r4unb02.airlab"
   ]
 }

@@ -79,6 +79,10 @@ pub struct NixosConfigPackage {
     pub pkg_type: String,
     pub flake_url: String,
     pub status: RwLockWrapper<PackageBuildStatus>,
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[serde(skip)]
+    pub commit: Arc<CommitInfo>,
 }
 
 unsafe impl Send for NixosConfigPackage {}

@@ -1,3 +1,4 @@
+use crate::backend::SETTINGS;
 use crate::backend::package::{PackageBase, PackageEnumTrait};
 use crate::backend::semaphore::Semaphore;
 use crate::repo::RepoInfo;
@@ -26,6 +27,7 @@ pub trait CommitInfoTrait {
         commit: &Arc<CommitInfo>,
         pkgs: &mut Vec<PackageEnum>,
     );
+    fn get_build_dir(&self) -> std::path::PathBuf;
 }
 
 impl CommitInfoTrait for CommitInfo {
@@ -134,6 +136,38 @@ impl CommitInfoTrait for CommitInfo {
 
                     Self::_parse_pkgs_value(new_map, new_path, commit, pkgs);
                 }
+            }
+        }
+    }
+
+    fn get_build_dir(&self) -> std::path::PathBuf {
+        let settings = SETTINGS.get().unwrap();
+        settings
+            .dir
+            .join("build")
+            .join(
+                &self
+                    .repo
+                    .flake_url
+                    .strip_prefix("git+https://")
+                    .unwrap()
+                    .replace("/", "_")
+                    .replace(":", "_"),
+            )
+            .join(&self.hash)
+    }
+}
+
+impl Drop for CommitInfo {
+    fn drop(&mut self) {
+        println!("Dropping commit {}", self.hash);
+
+        let build_dir = self.get_build_dir();
+        if build_dir.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&build_dir) {
+                println!("Failed to remove build directory {:?}: {}", build_dir, e);
+            } else {
+                println!("Removed build directory {:?}", build_dir);
             }
         }
     }

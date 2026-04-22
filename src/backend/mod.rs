@@ -49,6 +49,11 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _build_sem = Arc::new(Semaphore::init(build_pool_size as usize));
 
     let repo_dir = settings.dir.join("repos");
+    let build_dir = settings.dir.join("build");
+
+    if build_dir.exists()  {
+        std::fs::remove_dir_all(&build_dir)?;
+    }
 
     let build_repos = RepoList(VecArcWrapper::from(
         settings

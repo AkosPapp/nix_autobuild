@@ -1,4 +1,6 @@
 use crate::ARCHITECTURES;
+use crate::backend::SETTINGS;
+use crate::backend::commit::CommitInfoTrait;
 use crate::backend::package::PackageBase;
 use crate::serialize::RwLockWrapper;
 use crate::{
@@ -53,7 +55,21 @@ impl PackageBase for Package {
                 return;
             }
 
-            match Self::build_static(self.flake_url.as_str(), &self.status) {
+            let settings = SETTINGS.get().unwrap();
+
+            let link_path = if settings.enable_gcroots {
+                // <build_dir>/build/<repo_name>/<commit_hash>/<package_path>
+
+                let link_path = self
+                    .commit
+                    .get_build_dir()
+                    .join(self.path.replace("/", "_"));
+                Some(link_path)
+            } else {
+                None
+            };
+
+            match Self::build_static(self.flake_url.as_str(), &self.status, link_path) {
                 Ok(path) => {
                     *self.status.0.write().unwrap() = PackageBuildStatus::Success(path);
                 }

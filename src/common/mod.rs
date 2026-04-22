@@ -97,6 +97,25 @@ pub struct AutoBuildOptions {
         example = "[\"ssh-ng://builder@host1\"]"
     )]
     pub builders: Vec<String>,
+
+    #[nixos(
+        description = "List of hosts to copy built packages to. If empty, no files are copied.",
+        default = "[]",
+        example = "[\"ssh-ng://user@host1\"]"
+    )]
+    pub copy_to: Vec<String>,
+
+    #[nixos(
+        description = "Whether to substitute on destination when copying built packages",
+        default = "true"
+    )]
+    pub copy_to_substitute_on_destination: bool,
+
+    #[nixos(
+        description = "Whether to enable gcroots for the built packages",
+        default = "true"
+    )]
+    pub enable_gcroots: bool,
 }
 
 pub const ARCHITECTURES: [&str; 24] = [

@@ -83,6 +83,25 @@ in let
       example = ["ssh-ng://builder@host1"];
     };
 
+    copy_to = lib.mkOption {
+      type = types.listOf types.str;
+      description = "List of hosts to copy built packages to. If empty, no files are copied.";
+      default = [];
+      example = ["ssh-ng://user@host1"];
+    };
+
+    copy_to_substitute_on_destination = lib.mkOption {
+      type = types.bool;
+      description = "Whether to substitute on destination when copying built packages";
+      default = true;
+    };
+
+    enable_gcroots = lib.mkOption {
+      type = types.bool;
+      description = "Whether to enable gcroots for the built packages";
+      default = true;
+    };
+
     };
   };
 in autoBuildOptionsType
