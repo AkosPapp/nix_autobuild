@@ -19,14 +19,27 @@ use web_sys::{
 use yew::prelude::*;
 
 const COPY_ICON: &str = "\u{f0c5}";
-const DEFAULT_SQL_QUERY: &str = r#"SELECT repo, repo_status, package_path, package_status, result, commit_message
-FROM package_list as p
-WHERE package_status not like 'UnsupportedArchitecture' and (commit_timestamp_millis = (
-    SELECT MAX(commit_timestamp_millis)
-    FROM package_list as inner
-    WHERE p.repo = inner.repo and p.package_path = inner.package_path
-) or package_status in ('Building', 'WaitingForBuild'))
-ORDER BY repo, package_path, commit_timestamp"#;
+const DEFAULT_SQL_QUERY: &str = r#"SELECT
+    repo,
+    repo_status,
+    package_path,
+    package_status,
+    result,
+    commit_message
+FROM package_list AS p
+WHERE package_status NOT LIKE 'UnsupportedArchitecture'
+    AND (
+        package_status NOT LIKE 'Success'
+        OR commit_timestamp_millis = (
+            SELECT MAX(commit_timestamp_millis)
+            FROM package_list AS inner
+            WHERE p.repo = inner.repo
+                AND p.package_path = inner.package_path
+        )
+    )
+ORDER BY
+    repo,
+    package_path"#;
 
 // Fetch the repo list via Fetch API and return deserialized RepoList
 async fn fetch_repos() -> Result<RepoList, String> {

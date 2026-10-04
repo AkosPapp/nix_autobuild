@@ -17,7 +17,7 @@ self: {
   config = lib.mkIf config.services.nix_autobuild.enable (
     let
       configFile = builtins.toFile "config.json" (builtins.toJSON config.services.nix_autobuild.settings);
-      nix_autobuild = self.packages.${pkgs.system}.backend;
+      nix_autobuild = self.packages.${pkgs.stdenv.hostPlatform.system}.backend;
     in {
       systemd.services = {
         "nix_autobuild" = {
